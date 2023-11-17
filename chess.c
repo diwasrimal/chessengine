@@ -114,7 +114,8 @@ int getMoveDst(Move m);
 Move moveEncode(MoveFlag flag, int src_sq, int dst_sq);
 Board moveMake(Move m, Board b);
 void printMoves(const MoveList move_list);
-Ull testGenerationTillDepth(Board b, int depth);
+Ull generateTillDepth(Board b, int depth);
+void testMoveGeneration(void);
 
 int DEPTH = 7;
 
@@ -829,7 +830,7 @@ void printMoves(const MoveList move_list)
     printf("\n");
 }
 
-Ull testGenerationTillDepth(Board b, int depth)
+Ull generateTillDepth(Board b, int depth)
 {
     if (depth == 0)
         return 1;
@@ -851,4 +852,53 @@ Ull testGenerationTillDepth(Board b, int depth)
     }
 
     return total;
+}
+
+// https://www.chessprogramming.org/Perft_Results
+void testMoveGeneration(void)
+{
+    struct PositionData {
+        char *fen;
+        Ull nodes[30];
+        int depth;
+    };
+
+    const int n = 5;
+    struct PositionData positions[n] = {
+        {
+            .fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            .depth = 15,
+            .nodes = { 20, 400, 8902, 197281, 4865609, 119060324, 3195901860, 84998978956, 2439530234167, 69352859712417, 2097651003696806,},
+        },
+        {
+            .fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ",
+            .depth = 6,
+            .nodes = { 48, 2039, 97862, 4085603, 193690690, 8031647685, },
+        },
+        {
+            .fen = "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - ",
+            .depth = 8,
+            .nodes = { 14, 191, 2812, 43238, 674624, 11030083, 178633661, 3009794393, },
+        },
+        {
+            .fen = "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+            .depth = 6,
+            .nodes = { 6, 264, 9467, 422333, 15833292, 706045033, },
+        },
+        {
+            .fen = "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8 ",
+            .depth = 5,
+            .nodes = { 44, 1486, 62379, 2103487, 89941194, },
+        }
+    };
+
+    for (int i = 0; i < n; i++) {
+        printf("pos: %d\n", i);
+        struct PositionData pos = positions[i];
+        Board b = initBoardFromFen(pos.fen);
+        for (int d = 1; d <= DEPTH && d <= pos.depth; d++) {
+            Ull nodes = generateTillDepth(b, d);
+            printf("\tDepth: %d, nodes: %llu, calculated: %llu, %s\n", d, pos.nodes[d - 1], nodes, nodes == pos.nodes[d-1] ? "pass" : "FAIL");
+        }
+    }
 }
