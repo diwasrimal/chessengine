@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define MAX(x, y) ((x > y) ? x : y)
 #define MIN(x, y) ((x < y) ? x : y)
@@ -113,9 +114,9 @@ int getMoveDst(Move m);
 Move moveEncode(MoveFlag flag, int src_sq, int dst_sq);
 Board moveMake(Move m, Board b);
 void printMoves(const MoveList move_list);
-int testGenerationTillDepth(Board b, int depth);
+Ull testGenerationTillDepth(Board b, int depth);
 
-int DEPTH = 5;
+int DEPTH = 7;
 
 int main(int argc, char **argv)
 {
@@ -125,13 +126,20 @@ int main(int argc, char **argv)
     printf("Using FEN: %s\n", fen);
 
     Board b = initBoardFromFen(fen);
-    printBoard(b);
+    // printBoard(b);
 
     // MoveList moves = generateMoves(b);
     // printMoves(moves);
 
-    int total = testGenerationTillDepth(b, DEPTH);
-    printf("Depth %d, moves: %d\n", DEPTH, total);
+    // Performance test
+    for (int i = 0; i < DEPTH; i++) {
+        clock_t start = clock();
+        Ull total = testGenerationTillDepth(b, i);
+        clock_t diff = clock() - start;
+        int ms = diff * 1000 / CLOCKS_PER_SEC;
+        printf("Depth %d, moves: %llu, time: %d ms\n", i, total, ms);
+    }
+
 }
 
 int squareNameToIdx(char *name)
@@ -820,7 +828,7 @@ void printMoves(const MoveList move_list)
     printf("\n");
 }
 
-int testGenerationTillDepth(Board b, int depth)
+Ull testGenerationTillDepth(Board b, int depth)
 {
     if (depth == 0)
         return 1;
