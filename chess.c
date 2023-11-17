@@ -94,17 +94,17 @@ Ull decToBin(int n);
 void populateSquaresTillEdges(void);
 Board initBoardFromFen(char *starting_fen);
 void printBoard(const Board b);
-bool isKingChecked(Board b);
-MoveList generateMoves(const Board b);
-MoveList generateSingleMoves(const Board b, int src_sq);
-void fillSlidingMoves(const Board b, int src_sq, MoveList *list);
-void fillPawnMoves(const Board b, int src_sq, MoveList *list);
-void fillKnightMoves(const Board b, int src_sq, MoveList *list);
-void fillKingMoves(const Board b, int src_sq, MoveList *list);
-void fillAttacks(const Board b, int *attacks);
-void fillSingleAttacks(const Board b, int src_sq, int *attacks);
-void fillSlidingAttacks(const Board b, int src_sq, int *attacks);
-void fillPawnAttacks(const Board b, int src_sq, int *attacks);
+bool isKingChecked(const Board *b);
+MoveList generateMoves(const Board *b);
+MoveList generateSingleMoves(const Board *b, int src_sq);
+void fillSlidingMoves(const Board *b, int src_sq, MoveList *list);
+void fillPawnMoves(const Board *b, int src_sq, MoveList *list);
+void fillKnightMoves(const Board *b, int src_sq, MoveList *list);
+void fillKingMoves(const Board *b, int src_sq, MoveList *list);
+void fillAttacks(const Board *b, int *attacks);
+void fillSingleAttacks(const Board *b, int src_sq, int *attacks);
+void fillSlidingAttacks(const Board *b, int src_sq, int *attacks);
+void fillPawnAttacks(const Board *b, int src_sq, int *attacks);
 void fillKnightAttacks(int src_sq, int *attacks);
 void fillKingAttacks(int src_sq, int *attacks);
 MoveFlag getMoveFlag(Move m);
@@ -346,12 +346,12 @@ void printBoard(const Board b)
 }
 
 // Given a board, finds if opposing king is in check
-bool isKingChecked(Board b)
+bool isKingChecked(const Board *b)
 {
     int king_sq = -1;
     for (int src_sq = 0; src_sq < 64; src_sq++) {
-        if (b.pieces[src_sq] & KING &&
-            !haveSameColor(b.color_to_move, b.pieces[src_sq])) {
+        if (b->pieces[src_sq] & KING &&
+            !haveSameColor(b->color_to_move, b->pieces[src_sq])) {
             king_sq = src_sq;
             break;
         }
@@ -378,13 +378,13 @@ bool isKingChecked(Board b)
     return false;
 }
 
-MoveList generateMoves(const Board b)
+MoveList generateMoves(const Board *b)
 {
     MoveList pseudolegals = {.count = 0};
 
     for (int src_sq = 0; src_sq < 64; src_sq++) {
-        if (b.pieces[src_sq] == EMPTY_PIECE ||
-            !haveSameColor(b.color_to_move, b.pieces[src_sq]))
+        if (b->pieces[src_sq] == EMPTY_PIECE ||
+            !haveSameColor(b->color_to_move, b->pieces[src_sq]))
             continue;
 
         MoveList list = generateSingleMoves(b, src_sq);
@@ -397,8 +397,8 @@ MoveList generateMoves(const Board b)
     MoveList legalmoves = {.count = 0};
     for (size_t i = 0; i < pseudolegals.count; i++) {
         Move m = pseudolegals.moves[i];
-        Board updated = moveMake(m, b);
-        if (isKingChecked(updated))
+        Board updated = moveMake(m, *b);
+        if (isKingChecked(&updated))
             continue;
 
         legalmoves.moves[legalmoves.count++] = m;
@@ -407,35 +407,35 @@ MoveList generateMoves(const Board b)
     return legalmoves;
 }
 
-MoveList generateSingleMoves(const Board b, int src_sq)
+MoveList generateSingleMoves(const Board *b, int src_sq)
 {
     MoveList list = {.count = 0};
 
-    if (b.pieces[src_sq] & (ROOK | QUEEN | BISHOP)) {
+    if (b->pieces[src_sq] & (ROOK | QUEEN | BISHOP)) {
         fillSlidingMoves(b, src_sq, &list);
     }
-    else if (b.pieces[src_sq] & PAWN) {
+    else if (b->pieces[src_sq] & PAWN) {
         fillPawnMoves(b, src_sq, &list);
     }
-    else if (b.pieces[src_sq] & KNIGHT) {
+    else if (b->pieces[src_sq] & KNIGHT) {
         fillKnightMoves(b, src_sq, &list);
     }
-    else if (b.pieces[src_sq] & KING) {
+    else if (b->pieces[src_sq] & KING) {
         fillKingMoves(b, src_sq, &list);
     }
 
     return list;
 }
 
-void fillSlidingMoves(const Board b, int src_sq, MoveList *list)
+void fillSlidingMoves(const Board *b, int src_sq, MoveList *list)
 {
     // Rook only moves straight -> first 4 directions
     // Bishop only moves diagnoals -> 4 - 8 directins
     // Queen goes all directions
     int start = 0, end = 8;
-    if (b.pieces[src_sq] & ROOK)
+    if (b->pieces[src_sq] & ROOK)
         end = 4;
-    else if (b.pieces[src_sq] & BISHOP)
+    else if (b->pieces[src_sq] & BISHOP)
         start = 4;
 
     for (int direction = start; direction < end; direction++) {
@@ -445,10 +445,10 @@ void fillSlidingMoves(const Board b, int src_sq, MoveList *list)
             int dst_sq = src_sq + offset * (n + 1);
 
             // Path blocked by own piece
-            if (haveSameColor(b.pieces[dst_sq], b.pieces[src_sq]))
+            if (haveSameColor(b->pieces[dst_sq], b->pieces[src_sq]))
                 break;
 
-            if (b.pieces[dst_sq] != EMPTY_PIECE) {
+            if (b->pieces[dst_sq] != EMPTY_PIECE) {
                 list->moves[list->count++] =
                     moveEncode(CAPTURE, src_sq, dst_sq);
                 break;
@@ -467,9 +467,9 @@ const Direction PAWN_FORWARDS[2] = {UP, DOWN};
 const Direction PAWN_DIAGNOALS[2][2] = {{TOPLEFT, TOPRIGHT},
                                         {BOTLEFT, BOTRIGHT}};
 
-void fillPawnMoves(const Board b, int src_sq, MoveList *list)
+void fillPawnMoves(const Board *b, int src_sq, MoveList *list)
 {
-    int color = (b.pieces[src_sq] & WHITE) ? 0 : 1;
+    int color = (b->pieces[src_sq] & WHITE) ? 0 : 1;
     int rank = src_sq / 8;
     int promoting_rank = PAWN_PROMOTING_RANK[color];
     Direction forward = PAWN_FORWARDS[color];
@@ -482,7 +482,7 @@ void fillPawnMoves(const Board b, int src_sq, MoveList *list)
     forward_moves = MIN(forward_moves, SQUARES_TILL_EDGE[src_sq][forward]);
     for (int n = 1; n <= forward_moves; n++) {
         int dst_sq = src_sq + DIRECTION_OFFSETS[forward] * n;
-        if (b.pieces[dst_sq] != EMPTY_PIECE)
+        if (b->pieces[dst_sq] != EMPTY_PIECE)
             break;
 
         if ((dst_sq / 8) == promoting_rank) {
@@ -508,14 +508,14 @@ void fillPawnMoves(const Board b, int src_sq, MoveList *list)
             continue;
 
         int dst_sq = src_sq + DIRECTION_OFFSETS[direction];
-        if (dst_sq == b.ep_square) {
+        if (dst_sq == b->ep_square) {
             list->moves[list->count++] = moveEncode(EP_CAPTURE, src_sq, dst_sq);
             continue;
         }
 
         // Only captures are possible on diagnonals (except en passant)
-        if (b.pieces[dst_sq] == EMPTY_PIECE ||
-            haveSameColor(b.pieces[src_sq], b.pieces[dst_sq]))
+        if (b->pieces[dst_sq] == EMPTY_PIECE ||
+            haveSameColor(b->pieces[src_sq], b->pieces[dst_sq]))
             continue;
 
         if ((dst_sq / 8) == promoting_rank) {
@@ -537,7 +537,7 @@ void fillPawnMoves(const Board b, int src_sq, MoveList *list)
 const int KNIGHT_RANK_OFFSETS[8] = {2, 2, -2, -2, 1, 1, -1, -1};
 const int KNIGHT_FILE_OFFSETS[8] = {-1, 1, -1, 1, -2, 2, -2, 2};
 
-void fillKnightMoves(const Board b, int src_sq, MoveList *list)
+void fillKnightMoves(const Board *b, int src_sq, MoveList *list)
 {
     int rank = src_sq / 8;
     int file = src_sq % 8;
@@ -549,10 +549,10 @@ void fillKnightMoves(const Board b, int src_sq, MoveList *list)
 
         // Invalid square or same colored piece
         if (!isValidSquare(r, f) ||
-            haveSameColor(b.pieces[src_sq], b.pieces[dst_sq]))
+            haveSameColor(b->pieces[src_sq], b->pieces[dst_sq]))
             continue;
 
-        MoveFlag flag = (b.pieces[dst_sq] != EMPTY_PIECE) ? CAPTURE : QUIET;
+        MoveFlag flag = (b->pieces[dst_sq] != EMPTY_PIECE) ? CAPTURE : QUIET;
         list->moves[list->count++] = moveEncode(flag, src_sq, dst_sq);
     }
 }
@@ -568,7 +568,7 @@ const int KSC_FLAGS[2] = {WKSC, BKSC};
 const int QS_DST_SQ[2] = {2, 58};
 const int KS_DST_SQ[2] = {6, 62};
 
-void fillKingMoves(const Board b, int src_sq, MoveList *list)
+void fillKingMoves(const Board *b, int src_sq, MoveList *list)
 {
     // Normal moves
     for (int direction = 0; direction < 8; direction++) {
@@ -576,25 +576,25 @@ void fillKingMoves(const Board b, int src_sq, MoveList *list)
             continue;
 
         int dst_sq = src_sq + DIRECTION_OFFSETS[direction];
-        if (haveSameColor(b.pieces[src_sq], b.pieces[dst_sq]))
+        if (haveSameColor(b->pieces[src_sq], b->pieces[dst_sq]))
             continue;
 
-        MoveFlag flag = (b.pieces[dst_sq] != EMPTY_PIECE) ? CAPTURE : QUIET;
+        MoveFlag flag = (b->pieces[dst_sq] != EMPTY_PIECE) ? CAPTURE : QUIET;
         list->moves[list->count++] = moveEncode(flag, src_sq, dst_sq);
     }
 
     // Castle not available
-    if (b.castle_rights == NO_CASTLE)
+    if (b->castle_rights == NO_CASTLE)
         return;
 
-    int color = (b.pieces[src_sq] & WHITE) ? 0 : 1;
+    int color = (b->pieces[src_sq] & WHITE) ? 0 : 1;
 
     // Queen side castle
-    if (b.castle_rights & QSC_FLAGS[color]) {
+    if (b->castle_rights & QSC_FLAGS[color]) {
         bool possible = true;
         for (int i = 0; i < 3; i++) {
             int sq = QSC_SQ[color][i];
-            if (b.pieces[sq] != EMPTY_PIECE) {
+            if (b->pieces[sq] != EMPTY_PIECE) {
                 possible = false;
                 break;
             }
@@ -606,11 +606,11 @@ void fillKingMoves(const Board b, int src_sq, MoveList *list)
     }
 
     // King side castle
-    if (b.castle_rights & KSC_FLAGS[color]) {
+    if (b->castle_rights & KSC_FLAGS[color]) {
         bool possible = true;
         for (int i = 0; i < 2; i++) {
             int sq = KSC_SQ[color][i];
-            if (b.pieces[sq] != EMPTY_PIECE) {
+            if (b->pieces[sq] != EMPTY_PIECE) {
                 possible = false;
                 break;
             }
@@ -622,38 +622,38 @@ void fillKingMoves(const Board b, int src_sq, MoveList *list)
     }
 }
 
-void fillAttacks(const Board b, int *attacks)
+void fillAttacks(const Board *b, int *attacks)
 {
     for (int src_sq = 0; src_sq < 64; src_sq++) {
-        if (b.pieces[src_sq] == EMPTY_PIECE ||
-            !haveSameColor(b.color_to_move, b.pieces[src_sq]))
+        if (b->pieces[src_sq] == EMPTY_PIECE ||
+            !haveSameColor(b->color_to_move, b->pieces[src_sq]))
             continue;
         fillSingleAttacks(b, src_sq, attacks);
     }
 }
 
-void fillSingleAttacks(const Board b, int src_sq, int *attacks)
+void fillSingleAttacks(const Board *b, int src_sq, int *attacks)
 {
-    if (b.pieces[src_sq] & (ROOK | QUEEN | BISHOP)) {
+    if (b->pieces[src_sq] & (ROOK | QUEEN | BISHOP)) {
         fillSlidingAttacks(b, src_sq, attacks);
     }
-    else if (b.pieces[src_sq] & PAWN) {
+    else if (b->pieces[src_sq] & PAWN) {
         fillPawnAttacks(b, src_sq, attacks);
     }
-    else if (b.pieces[src_sq] & KNIGHT) {
+    else if (b->pieces[src_sq] & KNIGHT) {
         fillKnightAttacks(src_sq, attacks);
     }
-    else if (b.pieces[src_sq] & KING) {
+    else if (b->pieces[src_sq] & KING) {
         fillKingAttacks(src_sq, attacks);
     }
 }
 
-void fillSlidingAttacks(const Board b, int src_sq, int *attacks)
+void fillSlidingAttacks(const Board *b, int src_sq, int *attacks)
 {
     int start = 0, end = 8;
-    if (b.pieces[src_sq] & ROOK)
+    if (b->pieces[src_sq] & ROOK)
         end = 4;
-    else if (b.pieces[src_sq] & BISHOP)
+    else if (b->pieces[src_sq] & BISHOP)
         start = 4;
 
     for (int direction = start; direction < end; direction++) {
@@ -664,16 +664,16 @@ void fillSlidingAttacks(const Board b, int src_sq, int *attacks)
             attacks[dst_sq]++;
 
             // Further path blocked
-            if (b.pieces[dst_sq] != EMPTY_PIECE)
+            if (b->pieces[dst_sq] != EMPTY_PIECE)
                 break;
         }
     }
 }
 
-void fillPawnAttacks(const Board b, int src_sq, int *attacks)
+void fillPawnAttacks(const Board *b, int src_sq, int *attacks)
 {
     // Pawn only attacks diagnoals
-    int color = (b.pieces[src_sq] & WHITE) ? 0 : 1;
+    int color = (b->pieces[src_sq] & WHITE) ? 0 : 1;
     Direction diagonals[2] = {
         PAWN_DIAGNOALS[color][0],
         PAWN_DIAGNOALS[color][1],
@@ -826,18 +826,18 @@ int testGenerationTillDepth(Board b, int depth)
         return 1;
 
     int total = 0;
-    char src[3], dst[3];
-    MoveList list = generateMoves(b);
+    // char src[3], dst[3];
+    MoveList list = generateMoves(&b);
 
     for (size_t i = 0; i < list.count; i++) {
         Board new = moveMake(list.moves[i], b);
-        int src_sq = getMoveSrc(list.moves[i]);
-        int dst_sq = getMoveDst(list.moves[i]);
-        fillSquareName(src_sq, src);
-        fillSquareName(dst_sq, dst);
+        // int src_sq = getMoveSrc(list.moves[i]);
+        // int dst_sq = getMoveDst(list.moves[i]);
+        // fillSquareName(src_sq, src);
+        // fillSquareName(dst_sq, dst);
         int n_moves = testGenerationTillDepth(new, depth - 1);
-        if (depth == DEPTH)
-            printf("%s%s: %d\n", src, dst, n_moves);
+        // if (depth == DEPTH)
+        //     printf("%s%s: %d\n", src, dst, n_moves);
         total += n_moves;
     }
 
