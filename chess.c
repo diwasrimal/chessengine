@@ -314,15 +314,16 @@ Board initBoardFromFen(char *starting_fen)
     }
 
     b.halfmove_clock = 0;
+    b.fullmoves = 1;
     char *halfmove_clock = strtok(NULL, " ");
     if (halfmove_clock == NULL)
-        assert(0 && "Insufficient FEN string information");
+        return b;
+
     b.halfmove_clock = atoi(halfmove_clock);
 
-    b.fullmoves = 1;
     char *fullmoves = strtok(NULL, " ");
     if (fullmoves == NULL)
-        assert(0 && "Insufficient FEN string information");
+        return b;
     b.fullmoves = atoi(fullmoves);
 
     return b;
