@@ -1,4 +1,4 @@
-CFLAGS = -Wall -Wextra -g
+CFLAGS = -Wall -Wextra -g -O3
 CC = clang
 
 chess: chess.c
