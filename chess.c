@@ -10,6 +10,11 @@
 #define MAX(x, y) ((x > y) ? x : y)
 #define MIN(x, y) ((x < y) ? x : y)
 
+// 8 bits to represent a colored piece
+//      . .         . . . . . .
+//      ^ ^         ^ ^ ^ ^ ^ ^
+//     /   \        | | | | | |
+//   black white    k q b n r p
 typedef uint8_t Piece;
 const Piece EMPTY_PIECE = 0;
 const Piece PAWN = 1 << 0;
@@ -21,6 +26,10 @@ const Piece KING = 1 << 5;
 const Piece WHITE = 1 << 6;
 const Piece BLACK = 1 << 7;
 
+// 4 bits in format W W B B represent castling rights
+//                  ^ ^
+//                 /   \
+//           kingside   queenside
 typedef uint8_t CastleRight;
 const CastleRight NO_CASTLE = 0;
 const CastleRight BQSC = 1 << 0; // Black Queen Side Castle
@@ -28,6 +37,12 @@ const CastleRight BKSC = 1 << 1;
 const CastleRight WQSC = 1 << 2;
 const CastleRight WKSC = 1 << 3;
 
+// 4 bits to represent type of move
+//           . . . .
+//           ^ ^ ^^^
+//          /   \  other
+//    promotion  capture
+//
 typedef uint8_t MoveFlag;
 const MoveFlag QUIET = 0;
 const MoveFlag DOUBLE_PAWN_PUSH = 0b0001;
@@ -46,6 +61,7 @@ const MoveFlag ROOK_PROMO_CAPTURE = ROOK_PROMOTION | CAPTURE;
 const MoveFlag QUEEN_PROMO_CAPTURE = QUEEN_PROMOTION | CAPTURE;
 
 // 4 bits for flag, 6, 6 for src and dst squares
+// FFFFSSSSSSDDDDDD
 typedef uint16_t Move;
 const Move EMPTY_MOVE = 0;
 const Move MFLAG_MASK = 15 << 12;
@@ -57,11 +73,6 @@ typedef struct {
     Move moves[256];
     size_t count;
 } MoveList;
-
-// Max 64 squares could be attacked
-typedef struct {
-    int attacks[64];
-} AttackMap;
 
 typedef enum {
     RIGHT,
