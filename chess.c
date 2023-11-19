@@ -109,7 +109,6 @@ Board initBoardFromFen(char *starting_fen);
 void printBoard(const Board b);
 bool isKingChecked(const Board *b, Piece color);
 MoveList generateMoves(const Board *b);
-MoveList generateSingleMoves(const Board *b, int src_sq);
 void fillSlidingMoves(const Board *b, int src_sq, MoveList *list);
 void fillPawnMoves(const Board *b, int src_sq, MoveList *list);
 void fillKnightMoves(const Board *b, int src_sq, MoveList *list);
@@ -575,14 +574,6 @@ void fillKingMoves(const Board *b, int src_sq, MoveList *list)
     int attacks[64] = {0};
     Piece opposing_color = (b->color_to_move == WHITE) ? BLACK : WHITE;
     fillAttacks(b, opposing_color, attacks);
-
-    // printf("fillKingMoves() attacked squares\n");
-    // for (int r = 7; r >= 0; r--) {
-    //     for (int f = 0; f < 8; f++) {
-    //         printf("%d ", attacks[r * 8 + f]);
-    //     }
-    //     printf("\n");
-    // }
 
     // Normal moves
     for (int direction = 0; direction < 8; direction++) {
@@ -1068,4 +1059,3 @@ void testIsKingChecked(void)
                result[1]);
     }
 }
-
