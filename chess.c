@@ -98,8 +98,19 @@ typedef struct {
 
 typedef unsigned long long Ull;
 
+// Mapping of a square's index to its name
+const char *SQNAMES[64] = {
+    "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1",
+    "a2", "b2", "c2", "d2", "e2", "f2", "g2", "h2",
+    "a3", "b3", "c3", "d3", "e3", "f3", "g3", "h3",
+    "a4", "b4", "c4", "d4", "e4", "f4", "g4", "h4",
+    "a5", "b5", "c5", "d5", "e5", "f5", "g5", "h5",
+    "a6", "b6", "c6", "d6", "e6", "f6", "g6", "h6",
+    "a7", "b7", "c7", "d7", "e7", "f7", "g7", "h7",
+    "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8",
+};
+
 int squareNameToIdx(char *name);
-void fillSquareName(int square, char *name);
 char pieceToNotation(const Piece p);
 bool isValidSquare(int rank, int file);
 bool haveSameColor(Piece p1, Piece p2);
@@ -121,7 +132,7 @@ void fillKnightAttacks(int src_sq, int *attacks);
 void fillKingAttacks(int src_sq, int *attacks);
 Move moveEncode(MoveFlag flag, int src_sq, int dst_sq);
 Board moveMake(Move m, Board b);
-void printMoveToString(Move m, char *str);
+void printMoveToString(Move m, char *str, bool print_flag);
 void printMoves(const MoveList move_list);
 Ull generateTillDepth(Board b, int depth, bool show_move);
 void testMoveGeneration(void);
@@ -148,18 +159,6 @@ int squareNameToIdx(char *name)
     char file = name[0] - 'a';
     char rank = name[1] - '1';
     return rank * 8 + file;
-}
-
-void fillSquareName(int square, char *name)
-{
-    if (!isValidSquare(square / 8, square % 8)) {
-        sprintf(name, "-");
-    }
-    else {
-        char rank = '1' + (square / 8);
-        char file = 'a' + (square % 8);
-        sprintf(name, "%c%c", file, rank);
-    }
 }
 
 char pieceToNotation(const Piece p)
@@ -359,8 +358,7 @@ void printBoard(const Board b)
     }
     printf("\n");
 
-    char epsquare_name[3];
-    fillSquareName(b.ep_square, epsquare_name);
+    const char *epsquare_name = (b.ep_square == -1) ? "-" : SQNAMES[b.ep_square];
     printf("turn: %c, castle rights: %04llu, ep square: %s, halfmove_clock: "
            "%d, fullmoves: %d, king_squares: [%d %d]\n",
            ((b.color_to_move & WHITE) ? 'w' : 'b'), decToBin(b.castle_rights),
@@ -835,27 +833,28 @@ Board moveMake(Move m, Board b)
     return b;
 }
 
-void printMoveToString(Move m, char *str)
+void printMoveToString(Move m, char *str, bool print_flag)
 {
-    char src[3];
-    char dst[3];
     MoveFlag flag = getMoveFlag(m);
     int src_sq = getMoveSrc(m);
     int dst_sq = getMoveDst(m);
-    fillSquareName(src_sq, src);
-    fillSquareName(dst_sq, dst);
+    const char *src_sqname = SQNAMES[src_sq];
+    const char *dst_sqname = SQNAMES[dst_sq];
 
-    char *promoted = "";
+    char *promo_type = "";
     if (flag == QUEEN_PROMOTION || flag == QUEEN_PROMO_CAPTURE)
-        promoted = "q";
+        promo_type = "q";
     else if (flag == KNIGHT_PROMOTION || flag == KNIGHT_PROMO_CAPTURE)
-        promoted = "n";
+        promo_type = "n";
     else if (flag == BISHOP_PROMOTION || flag == BISHOP_PROMO_CAPTURE)
-        promoted = "b";
+        promo_type = "b";
     else if (flag == ROOK_PROMOTION || flag == ROOK_PROMO_CAPTURE)
-        promoted = "r";
+        promo_type = "r";
 
-    sprintf(str, "%s%s%s[%04llu]", src, dst, promoted, decToBin(flag));
+    if (print_flag)
+        sprintf(str, "%s%s%s[%04llu]", src_sqname, dst_sqname, promo_type, decToBin(flag));
+    else
+        sprintf(str, "%s%s%s", src_sqname, dst_sqname, promo_type);
 }
 
 void printMoves(const MoveList move_list)
@@ -864,7 +863,7 @@ void printMoves(const MoveList move_list)
     printf("Total moves: %lu\n", move_list.count);
     for (size_t i = 0; i < move_list.count; i++) {
         Move m = move_list.moves[i];
-        printMoveToString(m, str);
+        printMoveToString(m, str, true);
         printf("%s ", str);
     }
     printf("\n");
@@ -883,7 +882,7 @@ Ull generateTillDepth(Board b, int depth, bool show_move)
         Board new = moveMake(list.moves[i], b);
         int n_moves = generateTillDepth(new, depth - 1, false);
         if (show_move) {
-            printMoveToString(list.moves[i], move_str); 
+            printMoveToString(list.moves[i], move_str, true);
             printf("%s: %d\n", move_str, n_moves);
         }
         total += n_moves;
