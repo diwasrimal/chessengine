@@ -110,6 +110,7 @@ const char *SQNAMES[64] = {
     "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8",
 };
 
+void startInteractiveGame(char *fen);
 int squareNameToIdx(char *name);
 char pieceToNotation(const Piece p);
 bool isValidSquare(int rank, int file);
@@ -144,14 +145,47 @@ int main(int argc, char **argv)
     char *starting_fen =
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     char *fen = (argc >= 2) ? argv[1] : starting_fen;
-    printf("Using FEN: %s\n", fen);
 
-    Board b = initBoardFromFen(fen);
-    printBoard(b);
+    startInteractiveGame(fen);
 
     // testIsKingChecked();
-    testMoveGeneration();
+    // testMoveGeneration();
     testPerformance();
+}
+
+void startInteractiveGame(char *fen)
+{
+    printf("Starting ineractive game, FEN: %s\n", fen);
+    Board b = initBoardFromFen(fen);
+    char move_str[16], move_inp[16];
+
+    while (true) {
+        printBoard(b);
+        MoveList mlist = generateMoves(&b);
+        if (mlist.count == 0) {
+            if (isKingChecked(&b, b.color_to_move))
+                printf("Checkmate!!\n");
+            else
+                printf("No valid moves!\n");
+            break;
+        }
+        printMoves(mlist);
+
+        // Get a valid move from user and make move
+        Move move_to_make = EMPTY_MOVE;
+        do {
+            printf("Move: ");
+            scanf("%s", move_inp);
+            for (size_t i = 0; i < mlist.count; i++) {
+                printMoveToString(mlist.moves[i], move_str, false);
+                if (strcmp(move_str, move_inp) == 0) {
+                    move_to_make = mlist.moves[i];
+                    break;
+                }
+            }
+        } while (move_to_make == EMPTY_MOVE);
+        b = moveMake(move_to_make, b);
+    }
 }
 
 int squareNameToIdx(char *name)
@@ -603,7 +637,7 @@ void fillKingMoves(const Board *b, int src_sq, MoveList *list)
             b->pieces[QSC_EMPTY_SQ[col_idx][0]] == EMPTY_PIECE &&
             b->pieces[QSC_EMPTY_SQ[col_idx][1]] == EMPTY_PIECE &&
             b->pieces[QSC_EMPTY_SQ[col_idx][2]] == EMPTY_PIECE;
-        bool squares_are_safe = 
+        bool squares_are_safe =
             attacks[QSC_SAFE_SQ[col_idx][0]] == 0 &&
             attacks[QSC_SAFE_SQ[col_idx][1]] == 0;
         if (squares_are_empty && squares_are_safe) {
@@ -617,7 +651,7 @@ void fillKingMoves(const Board *b, int src_sq, MoveList *list)
         bool squares_are_empty =
             b->pieces[KSC_EMPTY_SQ[col_idx][0]] == EMPTY_PIECE &&
             b->pieces[KSC_EMPTY_SQ[col_idx][1]] == EMPTY_PIECE;
-        bool squares_are_safe = 
+        bool squares_are_safe =
             attacks[KSC_SAFE_SQ[col_idx][0]] == 0 &&
             attacks[KSC_SAFE_SQ[col_idx][1]] == 0;
         if (squares_are_empty && squares_are_safe) {
@@ -782,7 +816,7 @@ Board moveMake(Move m, Board b)
     if (b.pieces[src_sq] & ROOK) {
         if (b.castle_rights & QSC_FLAGS[col_idx] && src_sq == QSC_ROOK_SRC_SQ[col_idx])
             b.castle_rights ^= QSC_FLAGS[col_idx];
-        if (b.castle_rights & KSC_FLAGS[col_idx] && src_sq == KSC_ROOK_SRC_SQ[col_idx]) 
+        if (b.castle_rights & KSC_FLAGS[col_idx] && src_sq == KSC_ROOK_SRC_SQ[col_idx])
             b.castle_rights ^= KSC_FLAGS[col_idx];
     }
 
