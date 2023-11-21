@@ -279,12 +279,18 @@ Board initBoardFromFen(char *starting_fen)
     };
 
     Piece types[256];
-    types['K'] = KING;
-    types['Q'] = QUEEN;
-    types['N'] = KNIGHT;
-    types['B'] = BISHOP;
-    types['R'] = ROOK;
-    types['P'] = PAWN;
+    types['K'] = WHITE | KING;
+    types['Q'] = WHITE | QUEEN;
+    types['B'] = WHITE | BISHOP;
+    types['N'] = WHITE | KNIGHT;
+    types['R'] = WHITE | ROOK;
+    types['P'] = WHITE | PAWN;
+    types['k'] = BLACK | KING;
+    types['q'] = BLACK | QUEEN;
+    types['b'] = BLACK | BISHOP;
+    types['n'] = BLACK | KNIGHT;
+    types['r'] = BLACK | ROOK;
+    types['p'] = BLACK | PAWN;
 
     char fen[100];
     strcpy(fen, starting_fen);
@@ -304,12 +310,11 @@ Board initBoardFromFen(char *starting_fen)
         }
         else if (isalpha(c)) {
             int sq = rank * 8 + file;
-            int col_idx = isupper(c) ? 0 : 1; // white is 0, black is 1
-            char uppercased = toupper(c);
-            if (uppercased == 'K')
-                b.king_squares[col_idx] = sq;
-            b.pieces[sq] =
-                types[(int)uppercased] | (col_idx == 0 ? WHITE : BLACK);
+            b.pieces[sq] = types[(int)c];
+            if (c == 'K')
+                b.king_squares[0] = sq;
+            else if (c == 'k')
+                b.king_squares[1] = sq;
             file++;
         }
         else if (isdigit(c)) {
