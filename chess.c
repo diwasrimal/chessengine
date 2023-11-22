@@ -866,6 +866,27 @@ void printMoveToString(Move m, char *str, bool print_flag)
         sprintf(str, "%s%s%s", src_sqname, dst_sqname, promo_type);
 }
 
+// Compares two moves based on their flags
+// used for sorting moves
+int compareMove(const void *m1, const void *m2)
+{
+    MoveFlag flag1 = getMoveFlag(*(Move *)m1);
+    MoveFlag flag2 = getMoveFlag(*(Move *)m2);
+
+    // Greatest value goes first (decending sort)
+    if (flag1 > flag2)
+        return -1;
+    else if (flag1 < flag2)
+        return 1;
+    else
+        return 0;
+}
+
+void orderMoves(MoveList *mlist)
+{
+    qsort(mlist->moves, mlist->count, sizeof(Move), compareMove);
+}
+
 void printMoves(const MoveList move_list)
 {
     char str[20];
