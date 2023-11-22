@@ -96,8 +96,6 @@ typedef struct {
     int king_squares[2];
 } Board;
 
-typedef unsigned long long Ull;
-
 // Mapping of a square's index to its name
 const char *SQNAMES[64] = {
     "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1",
@@ -110,13 +108,62 @@ const char *SQNAMES[64] = {
     "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8",
 };
 
+// Arrays with dimensions 2 are for colors
+// 0 = white, 1 = black
+// Variables below are used for generating moves for a specific piece
+const int PAWN_PROMOTING_RANK[2] = {7, 0};
+const int PAWN_INITIAL_RANK[2] = {1, 6};
+const Direction PAWN_FORWARDS[2] = {UP, DOWN};
+const Direction PAWN_DIAGNOALS[2][2] = {{TOPLEFT, TOPRIGHT},
+                                        {BOTLEFT, BOTRIGHT}};
+const int KNIGHT_RANK_OFFSETS[8] = {2, 2, -2, -2, 1, 1, -1, -1};
+const int KNIGHT_FILE_OFFSETS[8] = {-1, 1, -1, 1, -2, 2, -2, 2};
+
+// These variables are used for making moves,
+// generating castling moves,
+// changing castle rights,
+// or checking castle rights
+const int QSC_FLAGS[2] = {WQSC, BQSC};
+const int KSC_FLAGS[2] = {WKSC, BKSC};
+
+// Squares that should be empty for castle to happen
+const int QSC_EMPTY_SQ[2][3] = {{1, 2, 3}, {57, 58, 59}};
+const int KSC_EMPTY_SQ[2][2] = {{5, 6}, {61, 62}};
+
+// Squares that should be safe for castle to happen
+const int QSC_SAFE_SQ[2][2] = {{2, 3}, {58, 59}};
+const int KSC_SAFE_SQ[2][2] = {{5, 6}, {61, 62}};
+
+// Squares the king moves to during castle
+const int QS_DST_SQ[2] = {2, 58};
+const int KS_DST_SQ[2] = {6, 62};
+
+// Rook's src and dst squares during castle
+const int QSC_ROOK_SRC_SQ[2] = {0, 56};
+const int QSC_ROOK_DST_SQ[2] = {3, 59};
+const int KSC_ROOK_SRC_SQ[2] = {7, 63};
+const int KSC_ROOK_DST_SQ[2] = {5, 61};
+
+// This is used to revoke castling right
+// castle_right & CRIGHT_REVOKING_MASK[0] revokes both castling rights for white
+const CastleRight CRIGHT_REVOKING_MASK[2] = {0b0011, 0b1100};
+
+// These are attack maps for king and knights
+// which are only dependent on src square (will be same for a give square)
+// precomputed once by populateAttackMaps()
+uint64_t KING_ATTACK_MAPS[64] = { 0ull };
+uint64_t KNIGHT_ATTACK_MAPS[64] = { 0ull };
+
+// Represents number of squares in between a given square and board's edge
+// precomputed once by populateSquaresTillEdges()
+int SQUARES_TILL_EDGE[64][8];
+
 void startInteractiveGame(char *fen);
 int squareNameToIdx(char *name);
 char pieceToNotation(const Piece p);
 bool isValidSquare(int rank, int file);
 bool haveSameColor(Piece p1, Piece p2);
-Ull decToBin(int n);
-void populateSquaresTillEdges(void);
+uint64_t decToBin(int n);
 Board initBoardFromFen(char *starting_fen);
 void printBoard(const Board b);
 bool isKingChecked(const Board *b, Piece color);
@@ -125,20 +172,20 @@ void fillSlidingMoves(const Board *b, int src_sq, MoveList *list);
 void fillPawnMoves(const Board *b, int src_sq, MoveList *list);
 void fillKnightMoves(const Board *b, int src_sq, MoveList *list);
 void fillKingMoves(const Board *b, int src_sq, MoveList *list);
-void fillAttacks(const Board *b, Piece attacker_color, int *attacks);
-void fillSingleAttacks(const Board *b, int src_sq, int *attacks);
-void fillSlidingAttacks(const Board *b, int src_sq, int *attacks);
-void fillPawnAttacks(const Board *b, int src_sq, int *attacks);
-void fillKnightAttacks(int src_sq, int *attacks);
-void fillKingAttacks(int src_sq, int *attacks);
+uint64_t generateSlidingAttackMap(const Board *b, int src_sq);
+uint64_t generatePawnAttackMap(const Board *b, int src_sq);
+uint64_t generateAttackMap(const Board *b, Piece attacking_color);
 Move moveEncode(MoveFlag flag, int src_sq, int dst_sq);
 Board moveMake(Move m, Board b);
 void printMoveToString(Move m, char *str, bool print_flag);
 void printMoves(const MoveList move_list);
-Ull generateTillDepth(Board b, int depth, bool show_move);
+uint64_t generateTillDepth(Board b, int depth, bool show_move);
 void testMoveGeneration(void);
 void testPerformance(void);
 void testIsKingChecked(void);
+void populateSquaresTillEdges(void);
+void populateAttackMaps(void);
+void precompute(void);
 
 int main(int argc, char **argv)
 {
@@ -146,10 +193,12 @@ int main(int argc, char **argv)
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     char *fen = (argc >= 2) ? argv[1] : starting_fen;
 
-    startInteractiveGame(fen);
+    precompute();
 
-    // testIsKingChecked();
-    // testMoveGeneration();
+    // startInteractiveGame(fen);
+
+    testIsKingChecked();
+    testMoveGeneration();
     testPerformance();
 }
 
@@ -228,7 +277,7 @@ bool haveSameColor(Piece p1, Piece p2)
     return ((p1 >> 6) == (p2 >> 6));
 }
 
-Ull decToBin(int n)
+uint64_t decToBin(int n)
 {
     int bin[32];
     int i = 0;
@@ -238,31 +287,11 @@ Ull decToBin(int n)
         i++;
     }
 
-    Ull result = 0;
+    uint64_t result = 0;
     for (int j = i - 1; j >= 0; j--)
         result = result * 10 + bin[j];
 
     return result;
-}
-
-// Finds squares between a square and board's edge in all possible directions
-// Called only once during board initialization
-int SQUARES_TILL_EDGE[64][8];
-void populateSquaresTillEdges(void)
-{
-    for (int rank = 0; rank < 8; rank++) {
-        for (int file = 0; file < 8; file++) {
-            int square = rank * 8 + file;
-            SQUARES_TILL_EDGE[square][RIGHT] = 8 - file - 1;
-            SQUARES_TILL_EDGE[square][LEFT] = file;
-            SQUARES_TILL_EDGE[square][UP] = 8 - rank - 1;
-            SQUARES_TILL_EDGE[square][DOWN] = rank;
-            SQUARES_TILL_EDGE[square][TOPRIGHT] = 8 - MAX(rank, file) - 1;
-            SQUARES_TILL_EDGE[square][BOTRIGHT] = MIN(rank, file);
-            SQUARES_TILL_EDGE[square][TOPLEFT] = MIN(8 - rank - 1, file);
-            SQUARES_TILL_EDGE[square][BOTLEFT] = MIN(8 - file - 1, rank);
-        }
-    }
 }
 
 Board initBoardFromFen(char *starting_fen)
@@ -414,11 +443,11 @@ bool isKingChecked(const Board *b, Piece color)
         assert(0 && "King not found!");
 
     // Find squares attacked by opposite color
-    int attacks[64] = {0};
     Piece opposing_color = (color == WHITE) ? BLACK : WHITE;
-    fillAttacks(b, opposing_color, attacks);
+    uint64_t attacks = generateAttackMap(b, opposing_color);
 
-    if (attacks[king_sq] > 0)
+    uint64_t king_mask = 1ull << king_sq;
+    if (attacks & king_mask)
         return true;
 
     return false;
@@ -493,13 +522,6 @@ void fillSlidingMoves(const Board *b, int src_sq, MoveList *list)
     }
 }
 
-// Idx 0 for white , 1 for black
-const int PAWN_PROMOTING_RANK[2] = {7, 0};
-const int PAWN_INITIAL_RANK[2] = {1, 6};
-const Direction PAWN_FORWARDS[2] = {UP, DOWN};
-const Direction PAWN_DIAGNOALS[2][2] = {{TOPLEFT, TOPRIGHT},
-                                        {BOTLEFT, BOTRIGHT}};
-
 void fillPawnMoves(const Board *b, int src_sq, MoveList *list)
 {
     int color = (b->pieces[src_sq] & WHITE) ? 0 : 1;
@@ -567,9 +589,6 @@ void fillPawnMoves(const Board *b, int src_sq, MoveList *list)
     }
 }
 
-const int KNIGHT_RANK_OFFSETS[8] = {2, 2, -2, -2, 1, 1, -1, -1};
-const int KNIGHT_FILE_OFFSETS[8] = {-1, 1, -1, 1, -2, 2, -2, 2};
-
 void fillKnightMoves(const Board *b, int src_sq, MoveList *list)
 {
     int rank = src_sq / 8;
@@ -590,27 +609,11 @@ void fillKnightMoves(const Board *b, int src_sq, MoveList *list)
     }
 }
 
-const int QSC_FLAGS[2] = {WQSC, BQSC};
-const int KSC_FLAGS[2] = {WKSC, BKSC};
-
-// Squares that should be empty for castle to happen
-const int QSC_EMPTY_SQ[2][3] = {{1, 2, 3}, {57, 58, 59}};
-const int KSC_EMPTY_SQ[2][2] = {{5, 6}, {61, 62}};
-
-// Squares that should be safe for castle to happen
-const int QSC_SAFE_SQ[2][2] = {{2, 3}, {58, 59}};
-const int KSC_SAFE_SQ[2][2] = {{5, 6}, {61, 62}};
-
-// Squares the king moves to during castle
-const int QS_DST_SQ[2] = {2, 58};
-const int KS_DST_SQ[2] = {6, 62};
-
 void fillKingMoves(const Board *b, int src_sq, MoveList *list)
 {
     // Find squares attacked by opponent
-    int attacks[64] = {0};
     Piece opposing_color = (b->color_to_move == WHITE) ? BLACK : WHITE;
-    fillAttacks(b, opposing_color, attacks);
+    uint64_t attacks = generateAttackMap(b, opposing_color);
 
     // Normal moves
     for (int direction = 0; direction < 8; direction++) {
@@ -622,7 +625,8 @@ void fillKingMoves(const Board *b, int src_sq, MoveList *list)
             continue;
 
         // King can't move to attacked square
-        if (attacks[dst_sq] > 0)
+        uint64_t dst_mask = 1ull << dst_sq;
+        if (attacks & dst_mask)
             continue;
 
         MoveFlag flag = (b->pieces[dst_sq] != EMPTY_PIECE) ? CAPTURE : QUIET;
@@ -630,7 +634,8 @@ void fillKingMoves(const Board *b, int src_sq, MoveList *list)
     }
 
     // Castle not possible if we don't have castle rights or if king is in check
-    bool is_checked = attacks[src_sq] > 0;
+    uint64_t src_mask = 1ull << src_sq;
+    bool is_checked = (attacks & src_mask) > 0;
     if (b->castle_rights == NO_CASTLE || is_checked)
         return;
 
@@ -643,8 +648,8 @@ void fillKingMoves(const Board *b, int src_sq, MoveList *list)
             b->pieces[QSC_EMPTY_SQ[col_idx][1]] == EMPTY_PIECE &&
             b->pieces[QSC_EMPTY_SQ[col_idx][2]] == EMPTY_PIECE;
         bool squares_are_safe =
-            attacks[QSC_SAFE_SQ[col_idx][0]] == 0 &&
-            attacks[QSC_SAFE_SQ[col_idx][1]] == 0;
+            (attacks & (1ull << QSC_SAFE_SQ[col_idx][0])) == 0 &&
+            (attacks & (1ull << QSC_SAFE_SQ[col_idx][1])) == 0;
         if (squares_are_empty && squares_are_safe) {
             list->moves[list->count++] =
                 moveEncode(QUEEN_CASTLE, src_sq, QS_DST_SQ[col_idx]);
@@ -657,8 +662,8 @@ void fillKingMoves(const Board *b, int src_sq, MoveList *list)
             b->pieces[KSC_EMPTY_SQ[col_idx][0]] == EMPTY_PIECE &&
             b->pieces[KSC_EMPTY_SQ[col_idx][1]] == EMPTY_PIECE;
         bool squares_are_safe =
-            attacks[KSC_SAFE_SQ[col_idx][0]] == 0 &&
-            attacks[KSC_SAFE_SQ[col_idx][1]] == 0;
+            (attacks & (1ull << KSC_SAFE_SQ[col_idx][0])) == 0 &&
+            (attacks & (1ull << KSC_SAFE_SQ[col_idx][1])) == 0;
         if (squares_are_empty && squares_are_safe) {
             list->moves[list->count++] =
                 moveEncode(KING_CASTLE, src_sq, KS_DST_SQ[col_idx]);
@@ -666,35 +671,10 @@ void fillKingMoves(const Board *b, int src_sq, MoveList *list)
     }
 }
 
-// Finds squares that are attacked by given color
-void fillAttacks(const Board *b, Piece attacker_color, int *attacks)
+uint64_t generateSlidingAttackMap(const Board *b, int src_sq)
 {
-    for (int src_sq = 0; src_sq < 64; src_sq++) {
-        if (b->pieces[src_sq] == EMPTY_PIECE ||
-            !haveSameColor(attacker_color, b->pieces[src_sq]))
-            continue;
-        fillSingleAttacks(b, src_sq, attacks);
-    }
-}
+    uint64_t attacks = 0;
 
-void fillSingleAttacks(const Board *b, int src_sq, int *attacks)
-{
-    if (b->pieces[src_sq] & (ROOK | QUEEN | BISHOP)) {
-        fillSlidingAttacks(b, src_sq, attacks);
-    }
-    else if (b->pieces[src_sq] & PAWN) {
-        fillPawnAttacks(b, src_sq, attacks);
-    }
-    else if (b->pieces[src_sq] & KNIGHT) {
-        fillKnightAttacks(src_sq, attacks);
-    }
-    else if (b->pieces[src_sq] & KING) {
-        fillKingAttacks(src_sq, attacks);
-    }
-}
-
-void fillSlidingAttacks(const Board *b, int src_sq, int *attacks)
-{
     int start = 0, end = 8;
     if (b->pieces[src_sq] & ROOK)
         end = 4;
@@ -706,17 +686,20 @@ void fillSlidingAttacks(const Board *b, int src_sq, int *attacks)
         for (int n = 0; n < SQUARES_TILL_EDGE[src_sq][direction]; n++) {
 
             int dst_sq = src_sq + offset * (n + 1);
-            attacks[dst_sq]++;
+            attacks |= (1ull << dst_sq);
 
             // Further path blocked
             if (b->pieces[dst_sq] != EMPTY_PIECE)
                 break;
         }
     }
+    return attacks;
 }
 
-void fillPawnAttacks(const Board *b, int src_sq, int *attacks)
+uint64_t generatePawnAttackMap(const Board *b, int src_sq)
 {
+    uint64_t attacks = 0;
+
     // Pawn only attacks diagnoals
     int color = (b->pieces[src_sq] & WHITE) ? 0 : 1;
     Direction diagonals[2] = {
@@ -727,35 +710,33 @@ void fillPawnAttacks(const Board *b, int src_sq, int *attacks)
     for (int i = 0; i < 2; i++) {
         if (SQUARES_TILL_EDGE[src_sq][diagonals[i]] != 0) {
             int dst_sq = src_sq + DIRECTION_OFFSETS[diagonals[i]];
-            attacks[dst_sq]++;
+            attacks |= 1ull << dst_sq;
         }
     }
+    return attacks;
 }
 
-void fillKnightAttacks(int src_sq, int *attacks)
+uint64_t generateAttackMap(const Board *b, Piece attacking_color)
 {
-    int rank = src_sq / 8;
-    int file = src_sq % 8;
+    uint64_t attacks = 0;
 
-    for (int i = 0; i < 8; i++) {
-        int r = rank + KNIGHT_RANK_OFFSETS[i];
-        int f = file + KNIGHT_FILE_OFFSETS[i];
-        if (isValidSquare(r, f)) {
-            int dst_sq = r * 8 + f;
-            attacks[dst_sq]++;
+    for (int src_sq = 0; src_sq < 64; src_sq++) {
+        if (b->pieces[src_sq] == EMPTY_PIECE || !haveSameColor(attacking_color, b->pieces[src_sq]))
+            continue;
+        if (b->pieces[src_sq] & (ROOK | BISHOP | QUEEN)) {
+            attacks |= generateSlidingAttackMap(b, src_sq);
+        }
+        else if (b->pieces[src_sq] & PAWN) {
+            attacks |= generatePawnAttackMap(b, src_sq);
+        }
+        else if (b->pieces[src_sq] & KNIGHT) {
+            attacks |= KNIGHT_ATTACK_MAPS[src_sq];
+        }
+        else if (b->pieces[src_sq] & KING) {
+            attacks |= KING_ATTACK_MAPS[src_sq];
         }
     }
-}
-
-void fillKingAttacks(int src_sq, int *attacks)
-{
-    // King attacks everywhere
-    for (int direction = 0; direction < 8; direction++) {
-        if (SQUARES_TILL_EDGE[src_sq][direction] != 0) {
-            int dst_sq = src_sq + DIRECTION_OFFSETS[direction];
-            attacks[dst_sq]++;
-        }
-    }
+    return attacks;
 }
 
 Move moveEncode(MoveFlag flag, int src_sq, int dst_sq)
@@ -768,17 +749,6 @@ MoveFlag getMoveFlag(Move m) { return (m & MFLAG_MASK) >> 12; }
 int getMoveSrc(Move m) { return (m & SRC_SQ_MASK) >> 6; }
 
 int getMoveDst(Move m) { return m & DST_SQ_MASK; }
-
-// Rook's src and dst squares during castle
-// idx 0 for white, 1 for black
-const int QSC_ROOK_SRC_SQ[2] = {0, 56};
-const int QSC_ROOK_DST_SQ[2] = {3, 59};
-const int KSC_ROOK_SRC_SQ[2] = {7, 63};
-const int KSC_ROOK_DST_SQ[2] = {5, 61};
-
-// This is used to revoke castling right
-// castle_right & CRIGHT_REVOKING_MASK[0] revokes both castling rights for white
-const CastleRight CRIGHT_REVOKING_MASK[2] = {0b0011, 0b1100};
 
 Board moveMake(Move m, Board b)
 {
@@ -908,7 +878,7 @@ void printMoves(const MoveList move_list)
     printf("\n");
 }
 
-Ull generateTillDepth(Board b, int depth, bool show_move)
+uint64_t generateTillDepth(Board b, int depth, bool show_move)
 {
     if (depth == 0)
         return 1;
@@ -935,7 +905,7 @@ void testMoveGeneration(void)
     printf("\ntestMoveGeneration()\n");
     struct PositionData {
         char *fen;
-        Ull nodes[30];
+        uint64_t nodes[30];
         int depth;
     };
 
@@ -946,74 +916,74 @@ void testMoveGeneration(void)
             .fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
             .depth = 15,
             .nodes =
-                {
-                    20,
-                    400,
-                    8902,
-                    197281,
-                    4865609,
-                    119060324,
-                    3195901860,
-                    84998978956,
-                    2439530234167,
-                    69352859712417,
-                    2097651003696806,
-                },
+            {
+                20,
+                400,
+                8902,
+                197281,
+                4865609,
+                119060324,
+                3195901860,
+                84998978956,
+                2439530234167,
+                69352859712417,
+                2097651003696806,
+            },
         },
         {
             .fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w "
-                   "KQkq - ",
+                "KQkq - ",
             .depth = 6,
             .nodes =
-                {
-                    48,
-                    2039,
-                    97862,
-                    4085603,
-                    193690690,
-                    8031647685,
-                },
+            {
+                48,
+                2039,
+                97862,
+                4085603,
+                193690690,
+                8031647685,
+            },
         },
         {
             .fen = "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - ",
             .depth = 8,
             .nodes =
-                {
-                    14,
-                    191,
-                    2812,
-                    43238,
-                    674624,
-                    11030083,
-                    178633661,
-                    3009794393,
-                },
+            {
+                14,
+                191,
+                2812,
+                43238,
+                674624,
+                11030083,
+                178633661,
+                3009794393,
+            },
         },
         {
             .fen = "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq "
-                   "- 0 1",
+                "- 0 1",
             .depth = 6,
             .nodes =
-                {
-                    6,
-                    264,
-                    9467,
-                    422333,
-                    15833292,
-                    706045033,
-                },
+            {
+                6,
+                264,
+                9467,
+                422333,
+                15833292,
+                706045033,
+            },
         },
         {
             .fen = "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8 ",
             .depth = 5,
             .nodes =
-                {
-                    44,
-                    1486,
-                    62379,
-                    2103487,
-                    89941194,
-                },
+            {
+                44,
+                1486,
+                62379,
+                2103487,
+                89941194,
+            },
         }};
 
     const int max_depth = 5;
@@ -1022,10 +992,10 @@ void testMoveGeneration(void)
         printf("pos: %d, fen: %s\n", i + 1, pos.fen);
         Board b = initBoardFromFen(pos.fen);
         for (int d = 1; d <= max_depth && d <= pos.depth; d++) {
-            Ull nodes = generateTillDepth(b, d, false);
-            printf("\t[%s]: depth: %d, nodes: %llu, calculated: %llu\n",
-                   nodes == pos.nodes[d - 1] ? "pass" : "FAIL", d,
-                   pos.nodes[d - 1], nodes);
+            uint64_t nodes = generateTillDepth(b, d, false);
+            printf("\t[%s]: depth: %d, nodes: %10llu, calculated: %10llu\n",
+                    nodes == pos.nodes[d - 1] ? "pass" : "FAIL", d,
+                    pos.nodes[d - 1], nodes);
         }
     }
 }
@@ -1038,10 +1008,10 @@ void testPerformance(void)
     int max_depth = 6;
     for (int d = 1; d <= max_depth; d++) {
         clock_t start = clock();
-        Ull total = generateTillDepth(b, d, false);
+        uint64_t total = generateTillDepth(b, d, false);
         clock_t diff = clock() - start;
         int ms = diff * 1000 / CLOCKS_PER_SEC;
-        printf("Depth %d, moves: %llu, time: %d ms\n", d, total, ms);
+        printf("Depth %d, moves: %10llu, time: %6d ms\n", d, total, ms);
     }
 }
 
@@ -1056,7 +1026,7 @@ void testIsKingChecked(void)
     const int n = 6;
     struct PositionData positions[n] = {
         {.fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-         .checked = {false, false}},
+            .checked = {false, false}},
         {
             .fen =
                 "rnbqkb1r/ppNpp1pp/5n2/5p2/8/8/PPPPPPPP/R1BQKBNR b KQkq - 0 1",
@@ -1073,12 +1043,12 @@ void testIsKingChecked(void)
         },
         {
             .fen = "1n2k1nr/1ppp1ppp/5N2/4p3/1b1P2Pq/N5b1/1PPQPP1P/r1B1KB1R b "
-                   "Kk - 0 1",
+                "Kk - 0 1",
             .checked = {false, true},
         },
         {.fen = "1n2k1nr/1ppp1ppp/8/3Np2B/1b1P2Pq/N5b1/1PPQPP1P/r1B1K2R b Kk - "
-                "0 1",
-         .checked = {false, false}},
+            "0 1",
+            .checked = {false, false}},
     };
 
     for (int i = 0; i < n; i++) {
@@ -1090,10 +1060,64 @@ void testIsKingChecked(void)
             isKingChecked(&b, BLACK),
         };
         printf("\t[%s]: white was checked: %d, result: %d\n",
-               pos.checked[0] == result[0] ? "pass" : "FAIL", pos.checked[0],
-               result[0]);
+                pos.checked[0] == result[0] ? "pass" : "FAIL", pos.checked[0],
+                result[0]);
         printf("\t[%s]: black was checked: %d, result: %d\n",
-               pos.checked[1] == result[1] ? "pass" : "FAIL", pos.checked[1],
-               result[1]);
+                pos.checked[1] == result[1] ? "pass" : "FAIL", pos.checked[1],
+                result[1]);
     }
 }
+
+// Finds squares between a square and board's edge in all possible directions
+// Called only once during board initialization
+void populateSquaresTillEdges(void)
+{
+    for (int rank = 0; rank < 8; rank++) {
+        for (int file = 0; file < 8; file++) {
+            int square = rank * 8 + file;
+            SQUARES_TILL_EDGE[square][RIGHT] = 8 - file - 1;
+            SQUARES_TILL_EDGE[square][LEFT] = file;
+            SQUARES_TILL_EDGE[square][UP] = 8 - rank - 1;
+            SQUARES_TILL_EDGE[square][DOWN] = rank;
+            SQUARES_TILL_EDGE[square][TOPRIGHT] = 8 - MAX(rank, file) - 1;
+            SQUARES_TILL_EDGE[square][BOTRIGHT] = MIN(rank, file);
+            SQUARES_TILL_EDGE[square][TOPLEFT] = MIN(8 - rank - 1, file);
+            SQUARES_TILL_EDGE[square][BOTLEFT] = MIN(8 - file - 1, rank);
+        }
+    }
+}
+
+// This function precomputes attack maps for king and knight
+void populateAttackMaps(void)
+{
+    for (int rank = 0; rank < 8; rank++) {
+        for (int file = 0; file < 8; file++) {
+            int src_sq = rank * 8 + file;
+
+            // King
+            for (int direction = 0; direction < 8; direction++) {
+                if (SQUARES_TILL_EDGE[src_sq][direction] != 0) {
+                    int dst_sq = src_sq + DIRECTION_OFFSETS[direction];
+                    KING_ATTACK_MAPS[src_sq] |= 1ull << dst_sq;
+                }
+            }
+
+            // Knight
+            for (int i = 0; i < 8; i++) {
+                int r = rank + KNIGHT_RANK_OFFSETS[i];
+                int f = file + KNIGHT_FILE_OFFSETS[i];
+                if (isValidSquare(r, f)) {
+                    int dst_sq = r * 8 + f;
+                    KNIGHT_ATTACK_MAPS[src_sq] |= 1ull << dst_sq;
+                }
+            }
+        }
+    }
+}
+
+void precompute(void)
+{
+    populateSquaresTillEdges();
+    populateAttackMaps();
+}
+
