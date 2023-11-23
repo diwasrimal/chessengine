@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <ctype.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -158,6 +159,8 @@ uint64_t KNIGHT_ATTACK_MAPS[64] = { 0ull };
 // precomputed once by populateSquaresTillEdges()
 int SQUARES_TILL_EDGE[64][8];
 
+bool LOG_SEARCH = false;
+
 void startInteractiveGame(char *fen);
 int squareNameToIdx(char *name);
 char pieceToNotation(const Piece p);
@@ -178,6 +181,8 @@ uint64_t generateAttackMap(const Board *b, Piece attacking_color);
 Move moveEncode(MoveFlag flag, int src_sq, int dst_sq);
 Board moveMake(Move m, Board b);
 void printMoveToString(Move m, char *str, bool print_flag);
+int compareMove(const void *m1, const void *m2);
+void orderMoves(MoveList *mlist);
 void printMoves(const MoveList move_list);
 uint64_t generateTillDepth(Board b, int depth, bool show_move);
 void testMoveGeneration(void);
@@ -186,6 +191,10 @@ void testIsKingChecked(void);
 void populateSquaresTillEdges(void);
 void populateAttackMaps(void);
 void precompute(void);
+int evaluateBoard(const Board *b);
+Move findBestMove(const Board *b);
+int bestEvaluation(const Board *b, int depth, bool is_maximizing, int alpha, int beta);
+int bestEvaluationRaw(const Board *b, int depth, bool is_maximizing);
 
 int main(int argc, char **argv)
 {
@@ -197,9 +206,19 @@ int main(int argc, char **argv)
 
     // startInteractiveGame(fen);
 
-    testIsKingChecked();
-    testMoveGeneration();
-    testPerformance();
+    Board b = initBoardFromFen(fen);
+    printBoard(b);
+    MoveList moves = generateMoves(&b);
+    printMoves(moves);
+
+    Move best_move = findBestMove(&b);
+    char move_str[15];
+    printMoveToString(best_move, move_str, true);
+    printf("Best move is: %s\n", move_str);
+
+    // testIsKingChecked();
+    // testPerformance();
+    // testMoveGeneration();
 }
 
 void startInteractiveGame(char *fen)
@@ -1031,8 +1050,8 @@ void testPerformance(void)
         clock_t start = clock();
         uint64_t total = generateTillDepth(b, d, false);
         clock_t diff = clock() - start;
-        int ms = diff * 1000 / CLOCKS_PER_SEC;
-        printf("Depth %d, moves: %10llu, time: %6d ms\n", d, total, ms);
+        double ms = (double)diff * 1000 / (double)CLOCKS_PER_SEC;
+        printf("Depth %d, moves: %10llu, time: %lf ms\n", d, total, ms);
     }
 }
 
@@ -1140,5 +1159,169 @@ void precompute(void)
 {
     populateSquaresTillEdges();
     populateAttackMaps();
+}
+
+int evaluateBoard(const Board *b)
+{
+    enum PieceType {
+        king,
+        queen,
+        bishop,
+        knight,
+        rook,
+        pawn,
+    };
+
+    int count[2][6] = {0};
+
+    for (int sq = 0; sq < 64; sq++) {
+        int col_idx = b->pieces[sq] & WHITE ? 0 : 1;
+        if (b->pieces[sq] & KING)
+            count[col_idx][king]++;
+        else if (b->pieces[sq] & QUEEN)
+            count[col_idx][queen]++;
+        else if (b->pieces[sq] & BISHOP)
+            count[col_idx][bishop]++;
+        else if (b->pieces[sq] & KNIGHT)
+            count[col_idx][knight]++;
+        else if (b->pieces[sq] & ROOK)
+            count[col_idx][rook]++;
+        else if (b->pieces[sq] & PAWN)
+            count[col_idx][pawn]++;
+    }
+
+    // White is supposed to be maximizing
+    int material_score = (count[0][queen] - count[1][queen]) * 90 +
+                         (count[0][bishop] - count[1][bishop]) * 30 +
+                         (count[0][knight] - count[1][knight]) * 30 +
+                         (count[0][rook] - count[1][rook]) * 50 +
+                         (count[0][pawn] - count[1][pawn]) * 10;
+
+    return material_score;
+}
+
+
+Move findBestMove(const Board *b)
+{
+    bool is_maximizing = (b->color_to_move & WHITE) ? true : false;
+    int minimax_depth = 6;
+    int best_score = is_maximizing ? INT_MIN : INT_MAX;
+    int best_move = EMPTY_MOVE;
+    int alpha = INT_MIN;
+    int beta = INT_MAX;
+
+    MoveList mlist = generateMoves(b);
+    clock_t start = clock();
+    char move_str[20];
+
+    for (size_t i = 0; i < mlist.count; i++) {
+        // printMoveToString(mlist.moves[i], move_str, true);
+        Board updated = moveMake(mlist.moves[i], *b);
+        if (is_maximizing) {
+            // int score = bestEvaluationRaw(&updated, minimax_depth - 1, false);
+            int score = bestEvaluation(&updated, minimax_depth - 1, false, alpha, beta);
+            if (LOG_SEARCH)
+                printf("Move: %s, is_maximizing: %d, score: %d, best_score: %d\n", move_str, is_maximizing, score, best_score);
+            if (score > best_score) {
+                best_score = score;
+                best_move = mlist.moves[i];
+            }
+        } else {
+            // int score = bestEvaluationRaw(&updated, minimax_depth - 1, false);
+            int score = bestEvaluation(&updated, minimax_depth - 1, true, alpha, beta);
+            if (LOG_SEARCH)
+                printf("Move: %s, is_maximizing: %d, score: %d, best_score: %d\n", move_str, is_maximizing, score, best_score);
+            if (score < best_score) {
+                best_score = score;
+                best_move = mlist.moves[i];
+            }
+        }
+    }
+
+    clock_t diff = clock() - start;
+    double ms = (double)diff * 1000 / (double)CLOCKS_PER_SEC;
+    printf("Searched depth: %d, Time elpased: %lf ms\n", minimax_depth, ms);
+    return best_move;
+}
+int bestEvaluation(const Board *b, int depth, bool is_maximizing, int alpha, int beta)
+{
+    if (depth == 0)
+        return evaluateBoard(b);
+
+    int best_score = is_maximizing ? INT_MIN : INT_MAX;
+    MoveList mlist = generateMoves(b);
+    char move_str[20];
+
+    for (size_t i = 0; i < mlist.count; i++) {
+        // printMoveToString(mlist.moves[i], move_str, true);
+        Board updated = moveMake(mlist.moves[i], *b);
+        if (is_maximizing) {
+            int score = bestEvaluation(&updated, depth - 1, false, alpha, beta);
+            if (LOG_SEARCH) {
+                for (int i = 0; i < 3 - depth; i++) printf("    ");
+                printf("Move: %s, is_maximizing: %d, score: %d, best_score: %d\n", move_str, is_maximizing, score, best_score);
+            }
+            if (score > best_score) {
+                best_score = score;
+                alpha = score;
+            }
+            if (score > beta) {
+                if (LOG_SEARCH) printf("score >= beta, pruning...");
+                return beta;
+            }
+        } else {
+            int score = bestEvaluation(&updated, depth - 1, true, alpha, beta);
+            if (LOG_SEARCH) {
+                for (int i = 0; i < 3 - depth; i++) printf("    ");
+                printf("Move: %s, is_maximizing: %d, score: %d, best_score: %d\n", move_str, is_maximizing, score, best_score);
+            }
+            if (score < best_score) {
+                best_score = score;
+                beta = score;
+            }
+            if (score <= alpha) {
+                if (LOG_SEARCH) printf("score <= alpha, pruning...");
+                return alpha;
+            }
+        }
+    }
+
+    return best_score;
+}
+
+int bestEvaluationRaw(const Board *b, int depth, bool is_maximizing)
+{
+    if (depth == 0)
+        return evaluateBoard(b);
+
+    int best_score = is_maximizing ? INT_MIN : INT_MAX;
+    MoveList mlist = generateMoves(b);
+    char move_str[20];
+
+    for (size_t i = 0; i < mlist.count; i++) {
+        // printMoveToString(mlist.moves[i], move_str, true);
+        Board updated = moveMake(mlist.moves[i], *b);
+        if (is_maximizing) {
+            int score = bestEvaluationRaw(&updated, depth - 1, false);
+            if (LOG_SEARCH) {
+                for (int i = 0; i < 3 - depth; i++) printf("    ");
+                printf("Move: %s, is_maximizing: %d, score: %d, best_score: %d\n", move_str, is_maximizing, score, best_score);
+            }
+            if (score > best_score) {
+                best_score = score;
+            }
+        } else {
+            int score = bestEvaluationRaw(&updated, depth - 1, true);
+            if (LOG_SEARCH) {
+                for (int i = 0; i < 3 - depth; i++) printf("    ");
+                printf("Move: %s, is_maximizing: %d, score: %d, best_score: %d\n", move_str, is_maximizing, score, best_score);
+            }
+            if (score < best_score) {
+                best_score = score;
+            }
+        }
+    }
+
+    return best_score;
 }
 
