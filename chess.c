@@ -505,6 +505,7 @@ MoveList generateMoves(const Board *b)
         legalmoves.moves[legalmoves.count++] = m;
     }
 
+    orderMoves(&legalmoves);
     return legalmoves;
 }
 
