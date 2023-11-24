@@ -29,8 +29,8 @@ const Piece BLACK = 1 << 7;
 
 // 4 bits in format W W B B represent castling rights
 //                  ^ ^
-//                 /   \
-//           kingside   queenside
+//                 /  |
+//           kingside queenside
 typedef uint8_t CastleRight;
 const CastleRight NO_CASTLE = 0;
 const CastleRight BQSC = 1 << 0; // Black Queen Side Castle
@@ -266,8 +266,6 @@ int squareNameToIdx(char *name)
 char pieceToNotation(const Piece p)
 {
     char notation;
-    if (p == EMPTY_PIECE)
-        return ' ';
 
     if (p & PAWN)
         notation = 'P';
@@ -281,6 +279,8 @@ char pieceToNotation(const Piece p)
         notation = 'Q';
     else if (p & KING)
         notation = 'K';
+    else
+        notation = ' ';
 
     return (p & BLACK) ? tolower(notation) : notation;
 }
@@ -358,7 +358,7 @@ Board initBoardFromFen(char *starting_fen)
         }
         else if (isalpha(c)) {
             int sq = rank * 8 + file;
-            b.pieces[sq] = types[(int)c];
+            b.pieces[sq] = types[(uint8_t)c];
             if (c == 'K')
                 b.king_squares[0] = sq;
             else if (c == 'k')
@@ -951,8 +951,7 @@ void testMoveGeneration(void)
     };
 
     // https://www.chessprogramming.org/Perft_Results
-    const int n = 5;
-    struct PositionData positions[n] = {
+    struct PositionData positions[] = {
         {
             .fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
             .depth = 15,
@@ -1027,6 +1026,7 @@ void testMoveGeneration(void)
             },
         }};
 
+    const int n = sizeof(positions) / sizeof(positions[0]);
     const int max_depth = 5;
     for (int i = 0; i < n; i++) {
         struct PositionData pos = positions[i];
@@ -1064,8 +1064,7 @@ void testIsKingChecked(void)
         bool checked[2]; // idx 0 means white king is checked, 1 means black
     };
 
-    const int n = 6;
-    struct PositionData positions[n] = {
+    struct PositionData positions[] = {
         {.fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
             .checked = {false, false}},
         {
@@ -1092,6 +1091,7 @@ void testIsKingChecked(void)
             .checked = {false, false}},
     };
 
+    const int n = sizeof(positions) / sizeof(positions[0]);
     for (int i = 0; i < n; i++) {
         struct PositionData pos = positions[i];
         printf("pos: %d, fen: %s\n", i, pos.fen);
