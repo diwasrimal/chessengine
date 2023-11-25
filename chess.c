@@ -1313,11 +1313,14 @@ Move findBestMove(const Board *b)
     clock_t start = clock();
     char move_str[20];
 
+    // No need to search if only one valid move remaining
+    if (mlist.count == 1)
+        return mlist.moves[0];
+
     for (size_t i = 0; i < mlist.count; i++) {
         // printMoveToString(mlist.moves[i], move_str, true);
         Board updated = moveMake(mlist.moves[i], *b);
         if (is_maximizing) {
-            // int score = bestEvaluationRaw(&updated, minimax_depth - 1, false);
             int score = bestEvaluation(&updated, minimax_depth - 1, false, alpha, beta);
             if (LOG_SEARCH)
                 printf("Move: %s, is_maximizing: %d, score: %d, best_score: %d\n", move_str, is_maximizing, score, best_score);
@@ -1326,7 +1329,6 @@ Move findBestMove(const Board *b)
                 best_move = mlist.moves[i];
             }
         } else {
-            // int score = bestEvaluationRaw(&updated, minimax_depth - 1, false);
             int score = bestEvaluation(&updated, minimax_depth - 1, true, alpha, beta);
             if (LOG_SEARCH)
                 printf("Move: %s, is_maximizing: %d, score: %d, best_score: %d\n", move_str, is_maximizing, score, best_score);
@@ -1364,8 +1366,8 @@ int bestEvaluation(const Board *b, int depth, bool is_maximizing, int alpha, int
                 best_score = score;
                 alpha = score;
             }
-            if (score > beta) {
-                if (LOG_SEARCH) printf("score >= beta, pruning...");
+            if (score >= beta) {
+                if (LOG_SEARCH) printf("score >= beta, pruning...\n");
                 return beta;
             }
         } else {
