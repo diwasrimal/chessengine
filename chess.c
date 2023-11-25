@@ -95,6 +95,7 @@ typedef struct {
     int halfmove_clock;
     int fullmoves;
     int king_squares[2];
+    uint64_t zobrist_hash;
 } Board;
 
 // Mapping of a square's index to its name
@@ -159,10 +160,32 @@ uint64_t KNIGHT_ATTACK_MAPS[64] = { 0ull };
 // precomputed once by populateSquaresTillEdges()
 int SQUARES_TILL_EDGE[64][8];
 
+// This struct of pseudorandom numbers is used to hash a chess position
+// hashing a position allows caching the search results in a transposition table
+// pieces[2][6][64]: 2 colors, 6 piece types, for each of 64 squares
+// castles[16]: total 16 combination of castling right is possible
+// black: denotes that it's black's turn to move
+struct ZobristValues {
+    uint64_t pieces[2][6][64];
+    uint64_t castles[16];
+    uint64_t ep_square[64];
+    uint64_t black;
+} ZOBRIST;
+
+typedef enum {
+    KING_IDX,
+    QUEEN_IDX,
+    BISHOP_IDX,
+    KNIGHT_IDX,
+    ROOK_IDX,
+    PAWN_IDX,
+} PieceIdx;
+
 bool LOG_SEARCH = false;
 
 void startInteractiveGame(char *fen);
 int squareNameToIdx(char *name);
+int getPieceIdx(Piece p);
 char pieceToNotation(const Piece p);
 bool isValidSquare(int rank, int file);
 bool haveSameColor(Piece p1, Piece p2);
@@ -195,6 +218,11 @@ int evaluateBoard(const Board *b);
 Move findBestMove(const Board *b);
 int bestEvaluation(const Board *b, int depth, bool is_maximizing, int alpha, int beta);
 int bestEvaluationRaw(const Board *b, int depth, bool is_maximizing);
+uint64_t rand64(void);
+void populateZobristValues(void);
+uint64_t getZobristHash(const Board *b);
+bool checkZobristTillDepth(const Board *b, int depth);
+void testZobristHashes(void);
 
 int main(int argc, char **argv)
 {
@@ -263,6 +291,16 @@ int squareNameToIdx(char *name)
     return rank * 8 + file;
 }
 
+int getPieceIdx(Piece p)
+{
+    return (p & KING)     ? KING_IDX
+           : (p & QUEEN)  ? QUEEN_IDX
+           : (p & BISHOP) ? BISHOP_IDX
+           : (p & KNIGHT) ? KNIGHT_IDX
+           : (p & ROOK)   ? ROOK_IDX
+                          : PAWN_IDX;
+}
+
 char pieceToNotation(const Piece p)
 {
     char notation;
@@ -324,6 +362,7 @@ Board initBoardFromFen(char *starting_fen)
         .halfmove_clock = 0,
         .fullmoves = 1,
         .king_squares = {-1},
+        .zobrist_hash = 0,
     };
 
     Piece types[256];
@@ -425,6 +464,7 @@ Board initBoardFromFen(char *starting_fen)
     b.fullmoves = atoi(fullmoves);
 
 defer:
+    b.zobrist_hash = getZobristHash(&b);
     return b;
 }
 
@@ -447,10 +487,10 @@ void printBoard(const Board b)
 
     const char *epsquare_name = (b.ep_square == -1) ? "-" : SQNAMES[b.ep_square];
     printf("turn: %c, castle rights: %04llu, ep square: %s, halfmove_clock: "
-           "%d, fullmoves: %d, king_squares: [%d %d]\n",
+           "%d, fullmoves: %d, king_squares: [%d %d], zobrist hash: %llu\n",
            ((b.color_to_move & WHITE) ? 'w' : 'b'), decToBin(b.castle_rights),
            epsquare_name, b.halfmove_clock, b.fullmoves, b.king_squares[0],
-           b.king_squares[1]);
+           b.king_squares[1], b.zobrist_hash);
 }
 
 // Finds if king with given color is in check
@@ -772,23 +812,42 @@ int getMoveDst(Move m) { return m & DST_SQ_MASK; }
 
 Board moveMake(Move m, Board b)
 {
-    MoveFlag flag = getMoveFlag(m);
-    int src_sq = getMoveSrc(m);
-    int dst_sq = getMoveDst(m);
-    int col_idx = (b.pieces[src_sq] & WHITE) ? 0 : 1;
-    int opp_col_idx = 1 - col_idx;
+    const MoveFlag flag = getMoveFlag(m);
+    const int src_sq = getMoveSrc(m);
+    const int dst_sq = getMoveDst(m);
+    const int col_idx = (b.pieces[src_sq] & WHITE) ? 0 : 1;
+    const int opp_col_idx = 1 - col_idx;
 
-    // Record / reset en passantable square
+    //
+    // En passant handling
+    //
+
+    // Reset en passantable square on every move
+    bool had_ep_square = b.ep_square != -1;
+    if (had_ep_square)
+        b.zobrist_hash ^= ZOBRIST.ep_square[b.ep_square];
+    b.ep_square = -1;
+
+    // Record en passantable square if move is a double pawn push
     int pawn_forward_offset = DIRECTION_OFFSETS[PAWN_FORWARDS[col_idx]];
     if (flag == DOUBLE_PAWN_PUSH) {
         b.ep_square = dst_sq - pawn_forward_offset;
+        b.zobrist_hash ^= ZOBRIST.ep_square[b.ep_square];
     }
-    else
-        b.ep_square = -1;
 
     // Capture pawn below dst square during en passant
-    if (flag == EP_CAPTURE)
-        b.pieces[dst_sq - pawn_forward_offset] = EMPTY_PIECE;
+    if (flag == EP_CAPTURE) {
+        int captured_sq = dst_sq - pawn_forward_offset;
+        b.pieces[captured_sq] = EMPTY_PIECE;
+        b.zobrist_hash ^= ZOBRIST.pieces[opp_col_idx][PAWN_IDX][captured_sq];
+    }
+
+    //
+    // Castles
+    //
+
+    // Remove previous castle right info from zobrist hash
+    b.zobrist_hash ^= ZOBRIST.castles[b.castle_rights];
 
     // Revoke castle rights if king is moving
     // and update king square
@@ -799,12 +858,20 @@ Board moveMake(Move m, Board b)
 
     // Move rook when castled
     if (flag == QUEEN_CASTLE) {
-        b.pieces[QSC_ROOK_DST_SQ[col_idx]] = b.pieces[QSC_ROOK_SRC_SQ[col_idx]];
-        b.pieces[QSC_ROOK_SRC_SQ[col_idx]] = EMPTY_PIECE;
+        int rook_src_sq = QSC_ROOK_SRC_SQ[col_idx];
+        int rook_dst_sq = QSC_ROOK_DST_SQ[col_idx];
+        b.pieces[rook_dst_sq] = b.pieces[rook_src_sq];
+        b.pieces[rook_src_sq] = EMPTY_PIECE;
+        b.zobrist_hash ^= ZOBRIST.pieces[col_idx][ROOK_IDX][rook_src_sq] ^
+                          ZOBRIST.pieces[col_idx][ROOK_IDX][rook_dst_sq];
     }
     else if (flag == KING_CASTLE) {
-        b.pieces[KSC_ROOK_DST_SQ[col_idx]] = b.pieces[KSC_ROOK_SRC_SQ[col_idx]];
-        b.pieces[KSC_ROOK_SRC_SQ[col_idx]] = EMPTY_PIECE;
+        int rook_src_sq = KSC_ROOK_SRC_SQ[col_idx];
+        int rook_dst_sq = KSC_ROOK_DST_SQ[col_idx];
+        b.pieces[rook_dst_sq] = b.pieces[rook_src_sq];
+        b.pieces[rook_src_sq] = EMPTY_PIECE;
+        b.zobrist_hash ^= ZOBRIST.pieces[col_idx][ROOK_IDX][rook_src_sq] ^
+                          ZOBRIST.pieces[col_idx][ROOK_IDX][rook_dst_sq];
     }
 
     // We lose castle right on a side if we move our rook
@@ -823,15 +890,39 @@ Board moveMake(Move m, Board b)
             b.castle_rights ^= KSC_FLAGS[opp_col_idx];
     }
 
-    // Update or reset halfmove clock
+    // Record updated castle right information in zobrist hash
+    b.zobrist_hash ^= ZOBRIST.castles[b.castle_rights];
+
+    //
+    // Increment / reset halfmove clock
+    //
     b.halfmove_clock++;
     if (flag & CAPTURE || b.pieces[src_sq] & PAWN)
         b.halfmove_clock = 0;
 
-    // Move src piece to dst
-    Piece dst_piece = b.pieces[src_sq];
+    //
+    // src -> dst movement
+    //
 
-    // Dst piece changes during promotion
+    // Remove piece from dst square if non empty
+    if (b.pieces[dst_sq] != EMPTY_PIECE) {
+        int dst_pi = getPieceIdx(b.pieces[dst_sq]);
+        b.zobrist_hash ^= ZOBRIST.pieces[opp_col_idx][dst_pi][dst_sq];
+    }
+
+    // Put src piece at dst square
+    int src_pi = getPieceIdx(b.pieces[src_sq]);
+    b.pieces[dst_sq] = b.pieces[src_sq];
+    b.zobrist_hash ^= ZOBRIST.pieces[col_idx][src_pi][dst_sq];
+
+    // Empty src square
+    b.pieces[src_sq] = EMPTY_PIECE;
+    b.zobrist_hash ^= ZOBRIST.pieces[col_idx][src_pi][src_sq];
+
+    //
+    // Promotion (change piece at dst square)
+    //
+
     if (flag & PROMOTION) {
         Piece promoted_piece = EMPTY_PIECE;
         if (flag == KNIGHT_PROMOTION || flag == KNIGHT_PROMO_CAPTURE)
@@ -844,11 +935,16 @@ Board moveMake(Move m, Board b)
             promoted_piece = ROOK;
 
         assert(promoted_piece != EMPTY_PIECE);
-        dst_piece = b.color_to_move | promoted_piece;
-    }
 
-    b.pieces[dst_sq] = dst_piece;
-    b.pieces[src_sq] = EMPTY_PIECE;
+        // Remove piece currently sitting at dst square
+        // this is the piece moved from src square to dst square previously
+        b.zobrist_hash ^= ZOBRIST.pieces[col_idx][src_pi][dst_sq];
+
+        // Put new promoted piece at dst square
+        b.pieces[dst_sq] = b.color_to_move | promoted_piece;
+        int dst_pi = getPieceIdx(b.pieces[dst_sq]);
+        b.zobrist_hash ^= ZOBRIST.pieces[col_idx][dst_pi][dst_sq];
+    }
 
     // Change turn and update fullmoves
     if (b.color_to_move == WHITE) {
@@ -858,6 +954,7 @@ Board moveMake(Move m, Board b)
         b.color_to_move = WHITE;
         b.fullmoves++;
     }
+    b.zobrist_hash ^= ZOBRIST.black;
 
     return b;
 }
@@ -1160,6 +1257,7 @@ void precompute(void)
 {
     populateSquaresTillEdges();
     populateAttackMaps();
+    populateZobristValues();
 }
 
 int evaluateBoard(const Board *b)
@@ -1326,3 +1424,120 @@ int bestEvaluationRaw(const Board *b, int depth, bool is_maximizing)
     return best_score;
 }
 
+// Generates random 64 bit integer (assuming srand() is called)
+uint64_t rand64(void)
+{
+    uint64_t r1 = rand(); // assuming RAND_MAX == 2^32-1
+    uint64_t r2 = rand();
+    return (r1 << 32) | (r2);
+}
+
+void populateZobristValues(void)
+{
+    const unsigned seed = 433453234;
+    srand(seed);
+
+    for (int col_idx = 0; col_idx < 2; col_idx++) {
+        for (int piece_idx = 0; piece_idx < 6; piece_idx++) {
+            for (int sq = 0; sq < 64; sq++) {
+                ZOBRIST.pieces[col_idx][piece_idx][sq] = rand64();
+            }
+        }
+    }
+
+    for (int castle = 0; castle < 16; castle++)
+        ZOBRIST.castles[castle] = rand64();
+
+    for (int ep_sq = 0; ep_sq < 64; ep_sq++)
+        ZOBRIST.ep_square[ep_sq] = rand64();
+
+    ZOBRIST.black = rand64();
+}
+
+// Hashes a chess position
+uint64_t getZobristHash(const Board *b)
+{
+    uint64_t hash = 0;
+
+    // Hash piece positions
+    for (int sq = 0; sq < 64; sq++) {
+        if (b->pieces[sq] == EMPTY_PIECE)
+            continue;
+        int col_idx = (b->pieces[sq] & WHITE) ? 0 : 1;
+        int piece_idx = getPieceIdx(b->pieces[sq]);
+        hash ^= ZOBRIST.pieces[col_idx][piece_idx][sq];
+    }
+
+    // Hash black's turn to move
+    if (b->color_to_move == BLACK)
+        hash ^= ZOBRIST.black;
+
+    // Hash castle rights
+    hash ^= ZOBRIST.castles[b->castle_rights];
+
+    // Hash ep square file if any
+    if (b->ep_square != -1)
+        hash ^= ZOBRIST.ep_square[b->ep_square];
+
+    return hash;
+}
+
+bool checkZobristTillDepth(const Board *b, int depth)
+{
+    if (depth == 0) {
+        uint64_t calculated_hash = getZobristHash(b);
+        if (b->zobrist_hash == calculated_hash)
+            return true;
+        printf("calculated_hash: %llu, b.zobrist_hash: %llu\n", calculated_hash, b->zobrist_hash);
+        return false;
+    }
+
+    MoveList mlist = generateMoves(b);
+
+    for (size_t i = 0; i < mlist.count; i++) {
+        Board updated = moveMake(mlist.moves[i], *b);
+        bool result = checkZobristTillDepth(&updated, depth - 1);
+        if (!result) {
+            char move_str[15];
+            printMoveToString(mlist.moves[i], move_str, true);
+            printf("On move: %s, depth: %d\n", move_str, depth);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void testZobristHashes(void)
+{
+    printf("\ntestZobristHashes()\n");
+    int depth = 4;
+    char *fens[6] = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "5r2/2p1p1N1/4P3/2R1R3/NK3pp1/5Pk1/2P1pp2/8 w - - 0 1",
+        "6R1/5P2/3p4/2Qr4/1p1pp2p/p4P1R/KP1P4/4k3 w - - 0 1",
+        "4kbnr/1pp2ppp/r2qb3/p2Pn3/2BP1B2/2N2N2/PPP1QPPP/R3R1K1 w k - 0 1",
+        "8/4pP2/1k1N2qP/1n1P4/PpK2b1P/8/1rP4R/8 w - - 0 1",
+        "r1bqkbnr/ppp2ppp/8/3Pn3/2B5/5N2/PPPPQPPP/RNB2RK1 b kq - 0 1",
+    };
+
+    for (size_t i = 0; i < 6; i++) {
+        Board b = initBoardFromFen(fens[i]);
+        MoveList mlist = generateMoves(&b);
+        bool passed = true;
+        for (size_t i = 0; i < mlist.count; i++) {
+            Board updated = moveMake(mlist.moves[i], b);
+            passed = checkZobristTillDepth(&updated, depth - 1);
+            if (!passed) {
+                char move_str[15];
+                printMoveToString(mlist.moves[i], move_str, true);
+                printf("On move: %s, depth: %d\n", move_str, depth);
+                printf("On board..\n");
+                printBoard(b);
+                break;
+            }
+        }
+        printf("[%s]: depth: %d, fen: %s\n", passed ? "pass" : "FAIL", depth, fens[i]);
+    }
+
+}
