@@ -217,7 +217,6 @@ void precompute(void);
 int evaluateBoard(const Board *b);
 Move findBestMove(const Board *b);
 int bestEvaluation(const Board *b, int depth, bool is_maximizing, int alpha, int beta);
-int bestEvaluationRaw(const Board *b, int depth, bool is_maximizing);
 uint64_t rand64(void);
 void populateZobristValues(void);
 uint64_t getZobristHash(const Board *b);
@@ -1383,42 +1382,6 @@ int bestEvaluation(const Board *b, int depth, bool is_maximizing, int alpha, int
             if (score <= alpha) {
                 if (LOG_SEARCH) printf("score <= alpha, pruning...");
                 return alpha;
-            }
-        }
-    }
-
-    return best_score;
-}
-
-int bestEvaluationRaw(const Board *b, int depth, bool is_maximizing)
-{
-    if (depth == 0)
-        return evaluateBoard(b);
-
-    int best_score = is_maximizing ? INT_MIN : INT_MAX;
-    MoveList mlist = generateMoves(b);
-    char move_str[20];
-
-    for (size_t i = 0; i < mlist.count; i++) {
-        // printMoveToString(mlist.moves[i], move_str, true);
-        Board updated = moveMake(mlist.moves[i], *b);
-        if (is_maximizing) {
-            int score = bestEvaluationRaw(&updated, depth - 1, false);
-            if (LOG_SEARCH) {
-                for (int i = 0; i < 3 - depth; i++) printf("    ");
-                printf("Move: %s, is_maximizing: %d, score: %d, best_score: %d\n", move_str, is_maximizing, score, best_score);
-            }
-            if (score > best_score) {
-                best_score = score;
-            }
-        } else {
-            int score = bestEvaluationRaw(&updated, depth - 1, true);
-            if (LOG_SEARCH) {
-                for (int i = 0; i < 3 - depth; i++) printf("    ");
-                printf("Move: %s, is_maximizing: %d, score: %d, best_score: %d\n", move_str, is_maximizing, score, best_score);
-            }
-            if (score < best_score) {
-                best_score = score;
             }
         }
     }
