@@ -1,79 +1,25 @@
-#include <assert.h>
+#include "engine.h"
+#include "utils.h"
+
 #include <ctype.h>
+#include <assert.h>
 #include <limits.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <time.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 
-#define MAX(x, y) ((x > y) ? x : y)
-#define MIN(x, y) ((x < y) ? x : y)
-
-// 8 bits to represent a colored piece
-//      . .         . . . . . .
-//      ^ ^         ^ ^ ^ ^ ^ ^
-//     /   \        | | | | | |
-//   black white    k q b n r p
-typedef uint8_t Piece;
-const Piece EMPTY_PIECE = 0;
-const Piece PAWN = 1 << 0;
-const Piece ROOK = 1 << 1;
-const Piece KNIGHT = 1 << 2;
-const Piece BISHOP = 1 << 3;
-const Piece QUEEN = 1 << 4;
-const Piece KING = 1 << 5;
-const Piece WHITE = 1 << 6;
-const Piece BLACK = 1 << 7;
-
-// 4 bits in format W W B B represent castling rights
-//                  ^ ^
-//                 /  |
-//           kingside queenside
-typedef uint8_t CastleRight;
-const CastleRight NO_CASTLE = 0;
-const CastleRight BQSC = 1 << 0; // Black Queen Side Castle
-const CastleRight BKSC = 1 << 1;
-const CastleRight WQSC = 1 << 2;
-const CastleRight WKSC = 1 << 3;
-
-// 4 bits to represent type of move
-//           . . . .
-//           ^ ^ ^^^
-//          /   \  other
-//    promotion  capture
-//
-typedef uint8_t MoveFlag;
-const MoveFlag QUIET = 0;
-const MoveFlag DOUBLE_PAWN_PUSH = 0b0001;
-const MoveFlag KING_CASTLE = 0b0010;
-const MoveFlag QUEEN_CASTLE = 0b0011;
-const MoveFlag CAPTURE = 0b0100;
-const MoveFlag EP_CAPTURE = 0b0101;
-const MoveFlag PROMOTION = 0b1000;
-const MoveFlag KNIGHT_PROMOTION = 0b00 | PROMOTION;
-const MoveFlag BISHOP_PROMOTION = 0b01 | PROMOTION;
-const MoveFlag ROOK_PROMOTION = 0b10 | PROMOTION;
-const MoveFlag QUEEN_PROMOTION = 0b11 | PROMOTION;
-const MoveFlag KNIGHT_PROMO_CAPTURE = KNIGHT_PROMOTION | CAPTURE;
-const MoveFlag BISHOP_PROMO_CAPTURE = BISHOP_PROMOTION | CAPTURE;
-const MoveFlag ROOK_PROMO_CAPTURE = ROOK_PROMOTION | CAPTURE;
-const MoveFlag QUEEN_PROMO_CAPTURE = QUEEN_PROMOTION | CAPTURE;
-
-// 4 bits for flag, 6, 6 for src and dst squares
-// FFFFSSSSSSDDDDDD
-typedef uint16_t Move;
-const Move EMPTY_MOVE = 0;
-const Move MFLAG_MASK = 15 << 12;
-const Move SRC_SQ_MASK = 63 << 6;
-const Move DST_SQ_MASK = 63;
-
-// Suppose 256 as maximum number of moves
-typedef struct {
-    Move moves[256];
-    size_t count;
-} MoveList;
+// This struct of pseudorandom numbers is used to hash a chess position
+// hashing a position allows caching the search results in a transposition table
+// pieces[2][6][64]: 2 colors, 6 piece types, for each of 64 squares
+// castles[16]: total 16 combination of castling right is possible
+// black: denotes that it's black's turn to move
+struct ZobristValues {
+    uint64_t pieces[2][6][64];
+    uint64_t castles[16];
+    uint64_t ep_square[64];
+    uint64_t black;
+} ZOBRIST;
 
 typedef enum {
     RIGHT,
@@ -86,29 +32,6 @@ typedef enum {
     BOTLEFT,
 } Direction;
 const int DIRECTION_OFFSETS[8] = {1, -1, 8, -8, 9, -9, 7, -7};
-
-typedef struct {
-    Piece pieces[64];
-    Piece color_to_move;
-    CastleRight castle_rights;
-    int ep_square;
-    int halfmove_clock;
-    int fullmoves;
-    int king_squares[2];
-    uint64_t zobrist_hash;
-} Board;
-
-// Mapping of a square's index to its name
-const char *SQNAMES[64] = {
-    "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1",
-    "a2", "b2", "c2", "d2", "e2", "f2", "g2", "h2",
-    "a3", "b3", "c3", "d3", "e3", "f3", "g3", "h3",
-    "a4", "b4", "c4", "d4", "e4", "f4", "g4", "h4",
-    "a5", "b5", "c5", "d5", "e5", "f5", "g5", "h5",
-    "a6", "b6", "c6", "d6", "e6", "f6", "g6", "h6",
-    "a7", "b7", "c7", "d7", "e7", "f7", "g7", "h7",
-    "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8",
-};
 
 // Arrays with dimensions 2 are for colors
 // 0 = white, 1 = black
@@ -160,200 +83,87 @@ uint64_t KNIGHT_ATTACK_MAPS[64] = { 0ull };
 // precomputed once by populateSquaresTillEdges()
 int SQUARES_TILL_EDGE[64][8];
 
-// This struct of pseudorandom numbers is used to hash a chess position
-// hashing a position allows caching the search results in a transposition table
-// pieces[2][6][64]: 2 colors, 6 piece types, for each of 64 squares
-// castles[16]: total 16 combination of castling right is possible
-// black: denotes that it's black's turn to move
-struct ZobristValues {
-    uint64_t pieces[2][6][64];
-    uint64_t castles[16];
-    uint64_t ep_square[64];
-    uint64_t black;
-} ZOBRIST;
-
-typedef enum {
-    KING_IDX,
-    QUEEN_IDX,
-    BISHOP_IDX,
-    KNIGHT_IDX,
-    ROOK_IDX,
-    PAWN_IDX,
-} PieceIdx;
-
 bool LOG_SEARCH = false;
 
-void startInteractiveGame(char *fen);
-int squareNameToIdx(char *name);
-int getPieceIdx(Piece p);
-char pieceToNotation(const Piece p);
-bool isValidSquare(int rank, int file);
-bool haveSameColor(Piece p1, Piece p2);
-uint64_t decToBin(int n);
-Board initBoardFromFen(char *starting_fen);
-void printBoard(const Board b);
-bool isKingChecked(const Board *b, Piece color);
-MoveList generateMoves(const Board *b);
-void fillSlidingMoves(const Board *b, int src_sq, MoveList *list);
-void fillPawnMoves(const Board *b, int src_sq, MoveList *list);
-void fillKnightMoves(const Board *b, int src_sq, MoveList *list);
-void fillKingMoves(const Board *b, int src_sq, MoveList *list);
-uint64_t generateSlidingAttackMap(const Board *b, int src_sq);
-uint64_t generatePawnAttackMap(const Board *b, int src_sq);
-uint64_t generateAttackMap(const Board *b, Piece attacking_color);
-Move moveEncode(MoveFlag flag, int src_sq, int dst_sq);
-Board moveMake(Move m, Board b);
-void printMoveToString(Move m, char *str, bool print_flag);
-int compareMove(const void *m1, const void *m2);
-void orderMoves(MoveList *mlist);
-void printMoves(const MoveList move_list);
-uint64_t generateTillDepth(Board b, int depth, bool show_move);
-void testMoveGeneration(void);
-void testPerformance(void);
-void testIsKingChecked(void);
-void populateSquaresTillEdges(void);
-void populateAttackMaps(void);
-void precompute(void);
-int evaluateBoard(const Board *b);
-Move findBestMove(const Board *b);
-int bestEvaluation(const Board *b, int depth, bool is_maximizing, int alpha, int beta);
-uint64_t rand64(void);
-void populateZobristValues(void);
-uint64_t getZobristHash(const Board *b);
-bool checkZobristTillDepth(const Board *b, int depth);
-void testZobristHashes(void);
 
-int main(int argc, char **argv)
+void precomputeValues(void)
 {
-    char *starting_fen =
-        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    char *fen = (argc >= 2) ? argv[1] : starting_fen;
-
-    precompute();
-
-    // startInteractiveGame(fen);
-
-    Board b = initBoardFromFen(fen);
-    printBoard(b);
-    MoveList moves = generateMoves(&b);
-    printMoves(moves);
-
-    Move best_move = findBestMove(&b);
-    char move_str[15];
-    printMoveToString(best_move, move_str, true);
-    printf("Best move is: %s\n", move_str);
-
-    // testIsKingChecked();
-    // testPerformance();
-    // testMoveGeneration();
+    populateSquaresTillEdges();
+    populateAttackMaps();
+    populateZobristValues();
 }
 
-void startInteractiveGame(char *fen)
+// Finds squares between a square and board's edge in all possible directions
+// Called only once during board initialization
+void populateSquaresTillEdges(void)
 {
-    printf("Starting ineractive game, FEN: %s\n", fen);
-    Board b = initBoardFromFen(fen);
-    char move_str[16], move_inp[16];
-
-    while (true) {
-        printBoard(b);
-        MoveList mlist = generateMoves(&b);
-        if (mlist.count == 0) {
-            if (isKingChecked(&b, b.color_to_move))
-                printf("Checkmate!!\n");
-            else
-                printf("No valid moves!\n");
-            break;
+    for (int rank = 0; rank < 8; rank++) {
+        for (int file = 0; file < 8; file++) {
+            int square = rank * 8 + file;
+            SQUARES_TILL_EDGE[square][RIGHT] = 8 - file - 1;
+            SQUARES_TILL_EDGE[square][LEFT] = file;
+            SQUARES_TILL_EDGE[square][UP] = 8 - rank - 1;
+            SQUARES_TILL_EDGE[square][DOWN] = rank;
+            SQUARES_TILL_EDGE[square][TOPRIGHT] = 8 - MAX(rank, file) - 1;
+            SQUARES_TILL_EDGE[square][BOTRIGHT] = MIN(rank, file);
+            SQUARES_TILL_EDGE[square][TOPLEFT] = MIN(8 - rank - 1, file);
+            SQUARES_TILL_EDGE[square][BOTLEFT] = MIN(8 - file - 1, rank);
         }
-        printMoves(mlist);
+    }
+}
 
-        // Get a valid move from user and make move
-        Move move_to_make = EMPTY_MOVE;
-        do {
-            printf("Move: ");
-            scanf("%s", move_inp);
-            for (size_t i = 0; i < mlist.count; i++) {
-                printMoveToString(mlist.moves[i], move_str, false);
-                if (strcmp(move_str, move_inp) == 0) {
-                    move_to_make = mlist.moves[i];
-                    break;
+// This function precomputes attack maps for king and knight
+void populateAttackMaps(void)
+{
+    for (int rank = 0; rank < 8; rank++) {
+        for (int file = 0; file < 8; file++) {
+            int src_sq = rank * 8 + file;
+
+            // King
+            for (int direction = 0; direction < 8; direction++) {
+                if (SQUARES_TILL_EDGE[src_sq][direction] != 0) {
+                    int dst_sq = src_sq + DIRECTION_OFFSETS[direction];
+                    KING_ATTACK_MAPS[src_sq] |= 1ull << dst_sq;
                 }
             }
-        } while (move_to_make == EMPTY_MOVE);
-        b = moveMake(move_to_make, b);
+
+            // Knight
+            for (int i = 0; i < 8; i++) {
+                int r = rank + KNIGHT_RANK_OFFSETS[i];
+                int f = file + KNIGHT_FILE_OFFSETS[i];
+                if (isValidSquare(r, f)) {
+                    int dst_sq = r * 8 + f;
+                    KNIGHT_ATTACK_MAPS[src_sq] |= 1ull << dst_sq;
+                }
+            }
+        }
     }
 }
 
-int squareNameToIdx(char *name)
+void populateZobristValues(void)
 {
-    char file = name[0] - 'a';
-    char rank = name[1] - '1';
-    return rank * 8 + file;
-}
+    const unsigned seed = 433453234;
+    srand(seed);
 
-int getPieceIdx(Piece p)
-{
-    return (p & KING)     ? KING_IDX
-           : (p & QUEEN)  ? QUEEN_IDX
-           : (p & BISHOP) ? BISHOP_IDX
-           : (p & KNIGHT) ? KNIGHT_IDX
-           : (p & ROOK)   ? ROOK_IDX
-                          : PAWN_IDX;
-}
-
-char pieceToNotation(const Piece p)
-{
-    char notation;
-
-    if (p & PAWN)
-        notation = 'P';
-    else if (p & ROOK)
-        notation = 'R';
-    else if (p & KNIGHT)
-        notation = 'N';
-    else if (p & BISHOP)
-        notation = 'B';
-    else if (p & QUEEN)
-        notation = 'Q';
-    else if (p & KING)
-        notation = 'K';
-    else
-        notation = ' ';
-
-    return (p & BLACK) ? tolower(notation) : notation;
-}
-
-bool isValidSquare(int rank, int file)
-{
-    return 0 <= rank && rank < 8 && 0 <= file && file < 8;
-}
-
-bool haveSameColor(Piece p1, Piece p2)
-{
-    // First 6 bits denote piece type, remove them and compare
-    return ((p1 >> 6) == (p2 >> 6));
-}
-
-uint64_t decToBin(int n)
-{
-    int bin[32];
-    int i = 0;
-    while (n > 0) {
-        bin[i] = n % 2;
-        n = n / 2;
-        i++;
+    for (int col_idx = 0; col_idx < 2; col_idx++) {
+        for (int piece_idx = 0; piece_idx < 6; piece_idx++) {
+            for (int sq = 0; sq < 64; sq++) {
+                ZOBRIST.pieces[col_idx][piece_idx][sq] = rand64();
+            }
+        }
     }
 
-    uint64_t result = 0;
-    for (int j = i - 1; j >= 0; j--)
-        result = result * 10 + bin[j];
+    for (int castle = 0; castle < 16; castle++)
+        ZOBRIST.castles[castle] = rand64();
 
-    return result;
+    for (int ep_sq = 0; ep_sq < 64; ep_sq++)
+        ZOBRIST.ep_square[ep_sq] = rand64();
+
+    ZOBRIST.black = rand64();
 }
 
 Board initBoardFromFen(char *starting_fen)
 {
-    populateSquaresTillEdges();
-
     // Initialize with default values
     Board b = {
         .castle_rights = NO_CASTLE,
@@ -485,11 +295,47 @@ void printBoard(const Board b)
     printf("\n");
 
     const char *epsquare_name = (b.ep_square == -1) ? "-" : SQNAMES[b.ep_square];
-    printf("turn: %c, castle rights: %04llu, ep square: %s, halfmove_clock: "
-           "%d, fullmoves: %d, king_squares: [%d %d], zobrist hash: %llu\n",
-           ((b.color_to_move & WHITE) ? 'w' : 'b'), decToBin(b.castle_rights),
-           epsquare_name, b.halfmove_clock, b.fullmoves, b.king_squares[0],
-           b.king_squares[1], b.zobrist_hash);
+    printf(
+        "turn: %c, castle rights: %04llu, ep square: %s, halfmove_clock: "
+        "%d, fullmoves: %d, king_squares: [%d %d], zobrist hash: %llu\n",
+        (b.color_to_move & WHITE) ? 'w' : 'b',
+        decToBin(b.castle_rights),
+        epsquare_name,
+        b.halfmove_clock,
+        b.fullmoves,
+        b.king_squares[0],
+        b.king_squares[1],
+        b.zobrist_hash
+    );
+}
+
+
+// Hashes a chess position
+uint64_t getZobristHash(const Board *b)
+{
+    uint64_t hash = 0;
+
+    // Hash piece positions
+    for (int sq = 0; sq < 64; sq++) {
+        if (b->pieces[sq] == EMPTY_PIECE)
+            continue;
+        int col_idx = (b->pieces[sq] & WHITE) ? 0 : 1;
+        int piece_idx = getPieceIdx(b->pieces[sq]);
+        hash ^= ZOBRIST.pieces[col_idx][piece_idx][sq];
+    }
+
+    // Hash black's turn to move
+    if (b->color_to_move == BLACK)
+        hash ^= ZOBRIST.black;
+
+    // Hash castle rights
+    hash ^= ZOBRIST.castles[b->castle_rights];
+
+    // Hash ep square file if any
+    if (b->ep_square != -1)
+        hash ^= ZOBRIST.ep_square[b->ep_square];
+
+    return hash;
 }
 
 // Finds if king with given color is in check
@@ -798,17 +644,6 @@ uint64_t generateAttackMap(const Board *b, Piece attacking_color)
     return attacks;
 }
 
-Move moveEncode(MoveFlag flag, int src_sq, int dst_sq)
-{
-    return ((Move)flag << 12) | ((Move)src_sq << 6) | dst_sq;
-}
-
-MoveFlag getMoveFlag(Move m) { return (m & MFLAG_MASK) >> 12; }
-
-int getMoveSrc(Move m) { return (m & SRC_SQ_MASK) >> 6; }
-
-int getMoveDst(Move m) { return m & DST_SQ_MASK; }
-
 Board moveMake(Move m, Board b)
 {
     const MoveFlag flag = getMoveFlag(m);
@@ -958,30 +793,6 @@ Board moveMake(Move m, Board b)
     return b;
 }
 
-void printMoveToString(Move m, char *str, bool print_flag)
-{
-    MoveFlag flag = getMoveFlag(m);
-    int src_sq = getMoveSrc(m);
-    int dst_sq = getMoveDst(m);
-    const char *src_sqname = SQNAMES[src_sq];
-    const char *dst_sqname = SQNAMES[dst_sq];
-
-    char *promo_type = "";
-    if (flag == QUEEN_PROMOTION || flag == QUEEN_PROMO_CAPTURE)
-        promo_type = "q";
-    else if (flag == KNIGHT_PROMOTION || flag == KNIGHT_PROMO_CAPTURE)
-        promo_type = "n";
-    else if (flag == BISHOP_PROMOTION || flag == BISHOP_PROMO_CAPTURE)
-        promo_type = "b";
-    else if (flag == ROOK_PROMOTION || flag == ROOK_PROMO_CAPTURE)
-        promo_type = "r";
-
-    if (print_flag)
-        sprintf(str, "%s%s%s[%04llu]", src_sqname, dst_sqname, promo_type, decToBin(flag));
-    else
-        sprintf(str, "%s%s%s", src_sqname, dst_sqname, promo_type);
-}
-
 // Compares two moves based on their flags
 // used for sorting moves
 int compareMove(const void *m1, const void *m2)
@@ -1003,7 +814,7 @@ void orderMoves(MoveList *mlist)
     qsort(mlist->moves, mlist->count, sizeof(Move), compareMove);
 }
 
-void printMoves(const MoveList move_list)
+void printMoveList(const MoveList move_list)
 {
     char str[20];
     printf("Total moves: %lu\n", move_list.count);
@@ -1035,228 +846,6 @@ uint64_t generateTillDepth(Board b, int depth, bool show_move)
     }
 
     return total;
-}
-
-void testMoveGeneration(void)
-{
-    printf("\ntestMoveGeneration()\n");
-    struct PositionData {
-        char *fen;
-        uint64_t nodes[30];
-        int depth;
-    };
-
-    // https://www.chessprogramming.org/Perft_Results
-    struct PositionData positions[] = {
-        {
-            .fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-            .depth = 15,
-            .nodes =
-            {
-                20,
-                400,
-                8902,
-                197281,
-                4865609,
-                119060324,
-                3195901860,
-                84998978956,
-                2439530234167,
-                69352859712417,
-                2097651003696806,
-            },
-        },
-        {
-            .fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w "
-                "KQkq - ",
-            .depth = 6,
-            .nodes =
-            {
-                48,
-                2039,
-                97862,
-                4085603,
-                193690690,
-                8031647685,
-            },
-        },
-        {
-            .fen = "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - ",
-            .depth = 8,
-            .nodes =
-            {
-                14,
-                191,
-                2812,
-                43238,
-                674624,
-                11030083,
-                178633661,
-                3009794393,
-            },
-        },
-        {
-            .fen = "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq "
-                "- 0 1",
-            .depth = 6,
-            .nodes =
-            {
-                6,
-                264,
-                9467,
-                422333,
-                15833292,
-                706045033,
-            },
-        },
-        {
-            .fen = "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8 ",
-            .depth = 5,
-            .nodes =
-            {
-                44,
-                1486,
-                62379,
-                2103487,
-                89941194,
-            },
-        }};
-
-    const int n = sizeof(positions) / sizeof(positions[0]);
-    const int max_depth = 5;
-    for (int i = 0; i < n; i++) {
-        struct PositionData pos = positions[i];
-        printf("pos: %d, fen: %s\n", i + 1, pos.fen);
-        Board b = initBoardFromFen(pos.fen);
-        for (int d = 1; d <= max_depth && d <= pos.depth; d++) {
-            uint64_t nodes = generateTillDepth(b, d, false);
-            printf("\t[%s]: depth: %d, nodes: %10llu, calculated: %10llu\n",
-                    nodes == pos.nodes[d - 1] ? "pass" : "FAIL", d,
-                    pos.nodes[d - 1], nodes);
-        }
-    }
-}
-
-void testPerformance(void)
-{
-    char *fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    printf("\nTesting perfomance on fen: %s\n", fen);
-    Board b = initBoardFromFen(fen);
-    int max_depth = 6;
-    for (int d = 1; d <= max_depth; d++) {
-        clock_t start = clock();
-        uint64_t total = generateTillDepth(b, d, false);
-        clock_t diff = clock() - start;
-        double ms = (double)diff * 1000 / (double)CLOCKS_PER_SEC;
-        printf("Depth %d, moves: %10llu, time: %lf ms\n", d, total, ms);
-    }
-}
-
-void testIsKingChecked(void)
-{
-    printf("\ntestIsKingChecked()\n");
-    struct PositionData {
-        char *fen;
-        bool checked[2]; // idx 0 means white king is checked, 1 means black
-    };
-
-    struct PositionData positions[] = {
-        {.fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-            .checked = {false, false}},
-        {
-            .fen =
-                "rnbqkb1r/ppNpp1pp/5n2/5p2/8/8/PPPPPPPP/R1BQKBNR b KQkq - 0 1",
-            .checked = {false, true} // meaning black is checked
-        },
-        {
-            .fen = "rnb1kb1r/ppppqppp/8/8/8/5n2/PPPP1PPP/RNBQKBNR w KQkq - 0 1",
-            .checked = {true, false},
-        },
-        {
-            .fen =
-                "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 0 1",
-            .checked = {true, false},
-        },
-        {
-            .fen = "1n2k1nr/1ppp1ppp/5N2/4p3/1b1P2Pq/N5b1/1PPQPP1P/r1B1KB1R b "
-                "Kk - 0 1",
-            .checked = {false, true},
-        },
-        {.fen = "1n2k1nr/1ppp1ppp/8/3Np2B/1b1P2Pq/N5b1/1PPQPP1P/r1B1K2R b Kk - "
-            "0 1",
-            .checked = {false, false}},
-    };
-
-    const int n = sizeof(positions) / sizeof(positions[0]);
-    for (int i = 0; i < n; i++) {
-        struct PositionData pos = positions[i];
-        printf("pos: %d, fen: %s\n", i, pos.fen);
-        Board b = initBoardFromFen(pos.fen);
-        bool result[2] = {
-            isKingChecked(&b, WHITE),
-            isKingChecked(&b, BLACK),
-        };
-        printf("\t[%s]: white was checked: %d, result: %d\n",
-                pos.checked[0] == result[0] ? "pass" : "FAIL", pos.checked[0],
-                result[0]);
-        printf("\t[%s]: black was checked: %d, result: %d\n",
-                pos.checked[1] == result[1] ? "pass" : "FAIL", pos.checked[1],
-                result[1]);
-    }
-}
-
-// Finds squares between a square and board's edge in all possible directions
-// Called only once during board initialization
-void populateSquaresTillEdges(void)
-{
-    for (int rank = 0; rank < 8; rank++) {
-        for (int file = 0; file < 8; file++) {
-            int square = rank * 8 + file;
-            SQUARES_TILL_EDGE[square][RIGHT] = 8 - file - 1;
-            SQUARES_TILL_EDGE[square][LEFT] = file;
-            SQUARES_TILL_EDGE[square][UP] = 8 - rank - 1;
-            SQUARES_TILL_EDGE[square][DOWN] = rank;
-            SQUARES_TILL_EDGE[square][TOPRIGHT] = 8 - MAX(rank, file) - 1;
-            SQUARES_TILL_EDGE[square][BOTRIGHT] = MIN(rank, file);
-            SQUARES_TILL_EDGE[square][TOPLEFT] = MIN(8 - rank - 1, file);
-            SQUARES_TILL_EDGE[square][BOTLEFT] = MIN(8 - file - 1, rank);
-        }
-    }
-}
-
-// This function precomputes attack maps for king and knight
-void populateAttackMaps(void)
-{
-    for (int rank = 0; rank < 8; rank++) {
-        for (int file = 0; file < 8; file++) {
-            int src_sq = rank * 8 + file;
-
-            // King
-            for (int direction = 0; direction < 8; direction++) {
-                if (SQUARES_TILL_EDGE[src_sq][direction] != 0) {
-                    int dst_sq = src_sq + DIRECTION_OFFSETS[direction];
-                    KING_ATTACK_MAPS[src_sq] |= 1ull << dst_sq;
-                }
-            }
-
-            // Knight
-            for (int i = 0; i < 8; i++) {
-                int r = rank + KNIGHT_RANK_OFFSETS[i];
-                int f = file + KNIGHT_FILE_OFFSETS[i];
-                if (isValidSquare(r, f)) {
-                    int dst_sq = r * 8 + f;
-                    KNIGHT_ATTACK_MAPS[src_sq] |= 1ull << dst_sq;
-                }
-            }
-        }
-    }
-}
-
-void precompute(void)
-{
-    populateSquaresTillEdges();
-    populateAttackMaps();
-    populateZobristValues();
 }
 
 int evaluateBoard(const Board *b)
@@ -1343,6 +932,7 @@ Move findBestMove(const Board *b)
     printf("Searched depth: %d, Time elpased: %lf ms\n", minimax_depth, ms);
     return best_move;
 }
+
 int bestEvaluation(const Board *b, int depth, bool is_maximizing, int alpha, int beta)
 {
     if (depth == 0)
@@ -1397,112 +987,3 @@ uint64_t rand64(void)
     return (r1 << 32) | (r2);
 }
 
-void populateZobristValues(void)
-{
-    const unsigned seed = 433453234;
-    srand(seed);
-
-    for (int col_idx = 0; col_idx < 2; col_idx++) {
-        for (int piece_idx = 0; piece_idx < 6; piece_idx++) {
-            for (int sq = 0; sq < 64; sq++) {
-                ZOBRIST.pieces[col_idx][piece_idx][sq] = rand64();
-            }
-        }
-    }
-
-    for (int castle = 0; castle < 16; castle++)
-        ZOBRIST.castles[castle] = rand64();
-
-    for (int ep_sq = 0; ep_sq < 64; ep_sq++)
-        ZOBRIST.ep_square[ep_sq] = rand64();
-
-    ZOBRIST.black = rand64();
-}
-
-// Hashes a chess position
-uint64_t getZobristHash(const Board *b)
-{
-    uint64_t hash = 0;
-
-    // Hash piece positions
-    for (int sq = 0; sq < 64; sq++) {
-        if (b->pieces[sq] == EMPTY_PIECE)
-            continue;
-        int col_idx = (b->pieces[sq] & WHITE) ? 0 : 1;
-        int piece_idx = getPieceIdx(b->pieces[sq]);
-        hash ^= ZOBRIST.pieces[col_idx][piece_idx][sq];
-    }
-
-    // Hash black's turn to move
-    if (b->color_to_move == BLACK)
-        hash ^= ZOBRIST.black;
-
-    // Hash castle rights
-    hash ^= ZOBRIST.castles[b->castle_rights];
-
-    // Hash ep square file if any
-    if (b->ep_square != -1)
-        hash ^= ZOBRIST.ep_square[b->ep_square];
-
-    return hash;
-}
-
-bool checkZobristTillDepth(const Board *b, int depth)
-{
-    if (depth == 0) {
-        uint64_t calculated_hash = getZobristHash(b);
-        if (b->zobrist_hash == calculated_hash)
-            return true;
-        printf("calculated_hash: %llu, b.zobrist_hash: %llu\n", calculated_hash, b->zobrist_hash);
-        return false;
-    }
-
-    MoveList mlist = generateMoves(b);
-
-    for (size_t i = 0; i < mlist.count; i++) {
-        Board updated = moveMake(mlist.moves[i], *b);
-        bool result = checkZobristTillDepth(&updated, depth - 1);
-        if (!result) {
-            char move_str[15];
-            printMoveToString(mlist.moves[i], move_str, true);
-            printf("On move: %s, depth: %d\n", move_str, depth);
-            return false;
-        }
-    }
-
-    return true;
-}
-
-void testZobristHashes(void)
-{
-    printf("\ntestZobristHashes()\n");
-    int depth = 4;
-    char *fens[6] = {
-        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-        "5r2/2p1p1N1/4P3/2R1R3/NK3pp1/5Pk1/2P1pp2/8 w - - 0 1",
-        "6R1/5P2/3p4/2Qr4/1p1pp2p/p4P1R/KP1P4/4k3 w - - 0 1",
-        "4kbnr/1pp2ppp/r2qb3/p2Pn3/2BP1B2/2N2N2/PPP1QPPP/R3R1K1 w k - 0 1",
-        "8/4pP2/1k1N2qP/1n1P4/PpK2b1P/8/1rP4R/8 w - - 0 1",
-        "r1bqkbnr/ppp2ppp/8/3Pn3/2B5/5N2/PPPPQPPP/RNB2RK1 b kq - 0 1",
-    };
-
-    for (size_t i = 0; i < 6; i++) {
-        Board b = initBoardFromFen(fens[i]);
-        MoveList mlist = generateMoves(&b);
-        bool passed = true;
-        for (size_t i = 0; i < mlist.count; i++) {
-            Board updated = moveMake(mlist.moves[i], b);
-            passed = checkZobristTillDepth(&updated, depth - 1);
-            if (!passed) {
-                char move_str[15];
-                printMoveToString(mlist.moves[i], move_str, true);
-                printf("On move: %s, depth: %d\n", move_str, depth);
-                printf("On board..\n");
-                printBoard(b);
-                break;
-            }
-        }
-        printf("[%s]: depth: %d, fen: %s\n", passed ? "pass" : "FAIL", depth, fens[i]);
-    }
-
-}

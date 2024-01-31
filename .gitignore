@@ -1,5 +1,7 @@
 tmp*
+*.o
 chess
+tests
 *.dSYM
 compile_flags.txt
 data.txt
