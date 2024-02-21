@@ -131,7 +131,7 @@ void populateAttackMaps(void)
             for (int i = 0; i < 8; i++) {
                 int r = rank + KNIGHT_RANK_OFFSETS[i];
                 int f = file + KNIGHT_FILE_OFFSETS[i];
-                if (isValidSquare(r, f)) {
+                if (isValidRankAndFile(r, f)) {
                     int dst_sq = r * 8 + f;
                     KNIGHT_ATTACK_MAPS[src_sq] |= 1ull << dst_sq;
                 }
@@ -505,7 +505,7 @@ void fillKnightMoves(const Board *b, int src_sq, MoveList *list)
         int dst_sq = r * 8 + f;
 
         // Invalid square or same colored piece
-        if (!isValidSquare(r, f) ||
+        if (!isValidRankAndFile(r, f) ||
             haveSameColor(b->pieces[src_sq], b->pieces[dst_sq]))
             continue;
 

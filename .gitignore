@@ -1,8 +1,10 @@
 tmp*
 *.o
-chess
-tests
 *.dSYM
+todo.txt
 compile_flags.txt
-data.txt
-chess.exe
+/data.txt
+/engine-interface.txt
+/tests
+/cli
+/gui

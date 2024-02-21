@@ -1,7 +1,13 @@
-#include "tests.h"
+#include "engine.h"
+
 #include <stdbool.h>
 #include <time.h>
 #include <stdio.h>
+
+void testIsKingChecked();
+void testPerformance();
+void testMoveGeneration();
+void testZobristHashes();
 
 int main(void)
 {

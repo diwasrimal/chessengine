@@ -18,8 +18,12 @@ int squareNameToIdx(char *name)
     return rank * 8 + file;
 }
 
+bool isValidSquare(int sq)
+{
+    return 0 <= sq && sq < 64;
+}
 
-bool isValidSquare(int rank, int file)
+bool isValidRankAndFile(int rank, int file)
 {
     return 0 <= rank && rank < 8 && 0 <= file && file < 8;
 }

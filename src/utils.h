@@ -10,7 +10,8 @@
 // Mapping of a square's index to its name
 extern const char *SQNAMES[64];
 
-bool isValidSquare(int rank, int file);
+bool isValidSquare(int sq);
+bool isValidRankAndFile(int rank, int file);
 int squareNameToIdx(char *name);
 uint64_t decToBin(int n);
 
