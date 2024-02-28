@@ -49,6 +49,10 @@ typedef struct {
     Move last_move;
     bool king_checked;
     PromotionState prom_state;
+    struct {
+        int src_sq;
+        V2 draw_pos;
+    } dragged_piece;
 } GuiState;
 
 Piece promotables[4] = {
@@ -62,6 +66,7 @@ int drawYByRank(int rank);
 int drawXByFile(int file);
 int rankByPosY(int posy);
 int fileByPosX(int posx);
+V2 sqDrawPos(int sq);
 Texture2D getPieceTexture(const char *path);
 void loadPieceTextures(Texture2D *arr);
 void unloadPieceTextures(Texture2D *arr);
@@ -79,6 +84,8 @@ int main(int argc, char **argv)
     char *fen = (argc >= 2) ? argv[1] : init_fen;
     precomputeValues();
 
+    bool computer_playing = false;
+
     Board board = initBoardFromFen(fen);
     GuiState state = initGuiState(&board);
     MoveList mlist = generateMoves(&board);
@@ -87,9 +94,6 @@ int main(int argc, char **argv)
     SetTargetFPS(60);
     Texture2D piece_textures[256];
     loadPieceTextures(piece_textures);
-
-    // Square where dragging started
-    int drag_src_sq = -1;
 
     while (!WindowShouldClose()) {
         BeginDrawing();
@@ -112,13 +116,13 @@ int main(int argc, char **argv)
                 int diff = posx - PROM_WIN_X + PROM_WIN_PADDING;
                 if (diff > 0 && y_start <= posy && posy <= y_end) {
                     int i = diff / CELL_SIZE;
-                    printf("i is: %d\n", i);
+                    printf("gui: i is: %d\n", i);
                     if (0 <= i && i <= 3) {
                         char move_str[10];
                         char prom_notations[4] = {'b', 'r', 'n', 'q'};
                         sprintf(move_str, "%s%c", state.prom_state.move_str,
                                 prom_notations[i]);
-                        printf("Promotion Move: %s\n", move_str);
+                        printf("gui: Promotion Move: %s\n", move_str);
                         Move m = getMatchingMove(move_str, mlist);
                         if (m != EMPTY_MOVE) {
                             board = moveMake(m, board);
@@ -136,43 +140,61 @@ int main(int argc, char **argv)
         }
         EndDrawing();
 
-        if (board.color_to_move & BLACK_PIECE) {
-            Move m = findBestMove(&board);
-            board = moveMake(m, board);
-            state.last_move = m;
-            mlist = generateMoves(&board);
-            printf("\nPossible moves: \n");
-            printMoveList(mlist);
-            continue;
+        if (computer_playing) {
+            if (board.color_to_move & BLACK_PIECE) {
+                Move m = findBestMove(&board);
+                board = moveMake(m, board);
+                state.last_move = m;
+                mlist = generateMoves(&board);
+                printf("\nPossible moves: \n");
+                printMoveList(mlist);
+                continue;
+            }
         }
 
         // Look for dragging events
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            drag_src_sq = rankByPosY(GetMouseY()) * 8 + fileByPosX(GetMouseX());
+            int sq = rankByPosY(GetMouseY()) * 8 + fileByPosX(GetMouseX());
+            if (isValidSquare(sq) && board.pieces[sq] != EMPTY_PIECE) {
+                state.dragged_piece.src_sq = sq;
+            }
         }
+
+        // Update piece's drawing position during drag
+        if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
+            if (state.dragged_piece.src_sq != -1) {
+                state.dragged_piece.draw_pos = (V2) {
+                    .x = GetMouseX() - CELL_SIZE / 2,
+                    .y = GetMouseY() - CELL_SIZE / 2,
+                };
+            }
+        }
+
+        // Trying making move after release
         if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
+            int src_sq = state.dragged_piece.src_sq;
             int dst_sq = rankByPosY(GetMouseY()) * 8 + fileByPosX(GetMouseX());
-            char tried_move_str[10] = {0};
-            findTriedMove(tried_move_str, &board, drag_src_sq, dst_sq,
-                          &state.prom_state);
-            if (!state.prom_state.pending) {
-                printf("Your Move: %s\n", tried_move_str);
-                Move m = getMatchingMove(tried_move_str, mlist);
-                if (m != EMPTY_MOVE) {
-                    board = moveMake(m, board);
-                    state.last_move = m;
-                    state.king_checked =
-                        isKingChecked(&board, board.color_to_move);
-                    mlist = generateMoves(&board);
-                    printf("\nPossible moves: \n");
-                    printMoveList(mlist);
+            if (src_sq != -1 && isValidSquare(dst_sq) && dst_sq != src_sq) {
+                char move_str[10] = {0};
+                findTriedMove(move_str, &board, src_sq, dst_sq, &state.prom_state);
+                if (!state.prom_state.pending) {
+                    printf("gui: Your Move: %s\n", move_str);
+                    Move m = getMatchingMove(move_str, mlist);
+                    if (m != EMPTY_MOVE) {
+                        board = moveMake(m, board);
+                        state.last_move = m;
+                        state.king_checked = isKingChecked(&board, board.color_to_move);
+                        mlist = generateMoves(&board);
+                        printf("\nengine: Possible moves: \n");
+                        printMoveList(mlist);
+                    }
                 }
             }
-            drag_src_sq = -1;
+            state.dragged_piece.src_sq = -1;
         }
     }
 
-    printf("Closing window\n");
+    printf("gui: Closing window\n");
     unloadPieceTextures(piece_textures);
     CloseWindow();
 }
@@ -187,6 +209,14 @@ int drawXByFile(int file) { return BOARD_PADDING + (file * CELL_SIZE); }
 int rankByPosY(int posy) { return 7 - (posy - BOARD_PADDING) / CELL_SIZE; }
 
 int fileByPosX(int posx) { return (posx - BOARD_PADDING) / CELL_SIZE; }
+
+V2 sqDrawPos(int sq)
+{
+    if (!isValidSquare(sq))
+        assert(0 && "Invalid square!");
+    V2 pos = {.x = drawXByFile(sq % 8), .y = drawYByRank(sq / 8)};
+    return pos;
+}
 
 Texture2D getPieceTexture(const char *path)
 {
@@ -248,14 +278,16 @@ void drawBoard(const Board *b, GuiState state, const Texture2D *textures)
             b->king_squares[b->color_to_move & WHITE_PIECE ? 0 : 1];
     }
 
+    int drag_src_sq = state.dragged_piece.src_sq;
+
+    // First draw backgrounds and idle pieces
+    int padding = ICON_DIFF / 2;
     for (int rank = 7; rank >= 0; rank--) {
         for (int file = 0; file < 8; file++) {
             int sq = rank * 8 + file;
-            int posx = drawXByFile(file);
-            int posy = drawYByRank(rank);
-
-            Color bg = (rank + file) % 2 == 0 ? COLOR_CHECKER_DARK
-                                              : COLOR_CHECKER_LIGHT;
+            int x = drawXByFile(file);
+            int y = drawYByRank(rank);
+            Color bg = (rank + file) % 2 == 0 ? COLOR_CHECKER_DARK : COLOR_CHECKER_LIGHT;
             if (sq == last_move_dst_sq || sq == last_move_src_sq) {
                 bg = COLOR_MOVE;
                 bg.a = (rank + file) % 2 == 0 ? 0xf0 : 0xd0;
@@ -263,13 +295,18 @@ void drawBoard(const Board *b, GuiState state, const Texture2D *textures)
             if (sq == checked_king_sq) {
                 bg = COLOR_CHECK;
             }
+            DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, bg);
 
-            DrawRectangle(posx, posy, CELL_SIZE, CELL_SIZE, bg);
-            if (b->pieces[sq] != EMPTY_PIECE) {
-                DrawTexture(textures[b->pieces[sq]], posx + ICON_DIFF / 2,
-                            posy + ICON_DIFF / 2, WHITE);
+            if (sq != drag_src_sq && b->pieces[sq] != EMPTY_PIECE) {
+                DrawTexture(textures[b->pieces[sq]], x + padding, y + padding, WHITE);
             }
         }
+    }
+
+    // Then draw piece that's being dragged (if any)
+    if (drag_src_sq != -1) {
+        V2 pos = state.dragged_piece.draw_pos;
+        DrawTexture(textures[b->pieces[drag_src_sq]], pos.x + padding, pos.y + padding, WHITE);
     }
 }
 
@@ -322,7 +359,9 @@ GuiState initGuiState(const Board *b)
         .king_checked = false,
         .last_move = EMPTY_MOVE,
         .prom_state.pending = false,
+        .dragged_piece.src_sq = -1,
     };
+
     if (isKingChecked(b, b->color_to_move))
         state.king_checked = true;
     return state;
