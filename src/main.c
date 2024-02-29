@@ -183,7 +183,6 @@ int main(int argc, char **argv)
                             strcpy(state.prom_move, try);
                         } else {
                             updateStateWithMove(&state, m);
-                            printMoveList(state.mlist);
                         }
                         break;
                     }
@@ -341,6 +340,12 @@ void updateStateWithMove(GameState *state, Move m)
     state->last_move = m;
     state->king_checked = isKingChecked(&state->board, state->board.color_to_move);
     state->mlist = generateMoves(&state->board);
+
+    printf("\ngui: States\n");
+    printf("gui: king_checked: %d\n", state->king_checked);
+    printf("gui: prom_pending: %d\n", state->prom_pending);
+    printf("gui: computer_thinking: %d\n", state->computer_thinking);
+    printMoveList(state->mlist);
 }
 
 void drawPromotionWindow(Piece promoting_color)

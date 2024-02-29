@@ -986,4 +986,3 @@ uint64_t rand64(void)
     uint64_t r2 = rand();
     return (r1 << 32) | (r2);
 }
-
