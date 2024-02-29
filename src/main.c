@@ -7,14 +7,15 @@
 #include <raylib.h>
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
 
 #define CELL_SIZE 80
 #define BOARD_PADDING 10
 #define BOARD_SIZE (CELL_SIZE * 8)
 #define WINDOW_SIZE (BOARD_SIZE + BOARD_PADDING * 2)
 
-#define ICON_DIFF 10
-#define ICON_SIZE (CELL_SIZE - ICON_DIFF)
+#define PIECE_PADDING 5
+#define PIECE_SIZE (CELL_SIZE - PIECE_PADDING*2)
 
 #define COLOR_CHECK             (Color) { 0xd7, 0x6c, 0x6c, 0xff }
 #define COLOR_BLACK             (Color) { 0x4E, 0x53, 0x56, 0xff }
@@ -37,15 +38,31 @@ typedef struct {
 } V2;
 
 typedef struct {
+    Board board;
+    MoveList mlist;
     Move last_move;
     bool king_checked;
     bool prom_pending;
+    bool computer_thinking;
     char prom_move[10];
-    struct {
-        int src_sq;
-        V2 draw_pos;
-    } dragged_piece;
-} GuiState;
+    int dragged_piece_src_sq;
+    V2 dragged_piece_draw_pos;
+} GameState;
+
+GameState initGameState(Board b);
+Texture2D getPieceTexture(const char *path);
+V2 sqDrawPos(int sq);
+int drawXByFile(int file);
+int drawYByRank(int rank);
+int fileByPosX(int posx);
+int rankByPosY(int posy);
+void drawBoard(const GameState *state);
+void drawCheckmate();
+void drawPromotionWindow(Piece promoting_color);
+void loadPieceTextures();
+void unloadPieceTextures();
+void updateStateWithMove(GameState *state, Move m);
+void *playComputerMove(void *st);
 
 Piece promotables[4] = {
     BISHOP,
@@ -54,19 +71,8 @@ Piece promotables[4] = {
     QUEEN,
 };
 
-int drawYByRank(int rank);
-int drawXByFile(int file);
-int rankByPosY(int posy);
-int fileByPosX(int posx);
-V2 sqDrawPos(int sq);
-Texture2D getPieceTexture(const char *path);
-void loadPieceTextures(Texture2D *arr);
-void unloadPieceTextures(Texture2D *arr);
-void drawBoard(const Board *b, GuiState state, const Texture2D *textures);
-void drawCheckmate();
-GuiState initGuiState(const Board *b);
-void drawPromotionWindow(Piece promoting_color, Texture2D *textures);
-
+// Textures for pieces, indexed by Piece itself
+Texture2D textures[256];
 
 int main(int argc, char **argv)
 {
@@ -74,30 +80,30 @@ int main(int argc, char **argv)
     char *fen = (argc >= 2) ? argv[1] : init_fen;
     precomputeValues();
 
+    GameState state = initGameState(initBoardFromFen(fen));
     bool computer_playing = true;
 
-    Board board = initBoardFromFen(fen);
-    GuiState state = initGuiState(&board);
-    MoveList mlist = generateMoves(&board);
+    // Board board = initBoardFromFen(fen);
+    // GuiState state = initGuiState(&board);
+    // MoveList mlist = generateMoves(&board);
 
     InitWindow(WINDOW_SIZE, WINDOW_SIZE, "Chess");
     SetTargetFPS(60);
-    Texture2D piece_textures[256];
-    loadPieceTextures(piece_textures);
+    loadPieceTextures();
 
     while (!WindowShouldClose()) {
         BeginDrawing();
         ClearBackground(COLOR_BLACK);
 
-        drawBoard(&board, state, piece_textures);
-        if (mlist.count == 0) {
+        drawBoard(&state);
+        if (state.mlist.count == 0) {
             drawCheckmate();
             EndDrawing();
             continue;
         }
 
         if (state.prom_pending) {
-            drawPromotionWindow(board.color_to_move, piece_textures);
+            drawPromotionWindow(state.board.color_to_move);
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 int x = GetMouseX();
                 int y = GetMouseY();
@@ -110,15 +116,12 @@ int main(int argc, char **argv)
                         char move_str[10];
                         char prom_notations[4] = {'b', 'r', 'n', 'q'};  // similar to display order
                         sprintf(move_str, "%s%c", state.prom_move, prom_notations[i]);
-                        for (size_t i = 0; i < mlist.count; i++) {
-                            Move m = mlist.moves[i];
+                        for (size_t i = 0; i < state.mlist.count; i++) {
+                            Move m = state.mlist.moves[i];
                             char str[10];
                             printMoveToString(m, str, false);
                             if (strcmp(move_str, str) == 0) {
-                                board = moveMake(m, board);
-                                state.last_move = m;
-                                state.king_checked = isKingChecked(&board, board.color_to_move);
-                                mlist = generateMoves(&board);
+                                updateStateWithMove(&state, m);
                                 state.prom_pending = false;
                             }
                         }
@@ -128,15 +131,13 @@ int main(int argc, char **argv)
             EndDrawing();
             continue;
         }
-        
-        if (computer_playing) {
-            if (board.color_to_move & BLACK_PIECE) {
-                Move m = findBestMove(&board);
-                board = moveMake(m, board);
-                state.last_move = m;
-                mlist = generateMoves(&board);
-                printf("\nPossible moves: \n");
-                printMoveList(mlist);
+
+        if (computer_playing && !state.computer_thinking) {
+            if (state.board.color_to_move & BLACK_PIECE) {
+                pthread_t tid;
+                printf("Computer thinking...\n");
+                state.computer_thinking = true;
+                pthread_create(&tid, NULL, playComputerMove, (void *)&state);
                 continue;
             }
         }
@@ -146,15 +147,15 @@ int main(int argc, char **argv)
         // Look for dragging events
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             int sq = rankByPosY(GetMouseY()) * 8 + fileByPosX(GetMouseX());
-            if (isValidSquare(sq) && board.pieces[sq] != EMPTY_PIECE) {
-                state.dragged_piece.src_sq = sq;
+            if (isValidSquare(sq) && state.board.pieces[sq] != EMPTY_PIECE) {
+                state.dragged_piece_src_sq = sq;
             }
         }
 
         // Update piece's drawing position during drag
         if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
-            if (state.dragged_piece.src_sq != -1) {
-                state.dragged_piece.draw_pos = (V2) {
+            if (state.dragged_piece_src_sq != -1) {
+                state.dragged_piece_draw_pos = (V2) {
                     .x = GetMouseX() - CELL_SIZE / 2,
                     .y = GetMouseY() - CELL_SIZE / 2,
                 };
@@ -163,7 +164,7 @@ int main(int argc, char **argv)
 
         // Try making move after release
         if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
-            int src_sq = state.dragged_piece.src_sq;
+            int src_sq = state.dragged_piece_src_sq;
             int dst_sq = rankByPosY(GetMouseY()) * 8 + fileByPosX(GetMouseX());
             if (src_sq != -1 && isValidSquare(dst_sq) && dst_sq != src_sq) {
 
@@ -171,8 +172,8 @@ int main(int argc, char **argv)
                 snprintf(try, sizeof(try), "%s%s", SQNAMES[src_sq], SQNAMES[dst_sq]);
                 printf("gui: tried move: %s\n", try);
 
-                for (size_t i = 0; i < mlist.count; i++) {
-                    Move m = mlist.moves[i];
+                for (size_t i = 0; i < state.mlist.count; i++) {
+                    Move m = state.mlist.moves[i];
                     char str[10];
                     printMoveToString(m, str, false);
                     if (strncmp(str, try, 4) == 0) {
@@ -181,22 +182,19 @@ int main(int argc, char **argv)
                             state.prom_pending = true;
                             strcpy(state.prom_move, try);
                         } else {
-                            board = moveMake(m, board);
-                            state.last_move = m;
-                            state.king_checked = isKingChecked(&board, board.color_to_move);
-                            mlist = generateMoves(&board);
-                            printMoveList(mlist);
+                            updateStateWithMove(&state, m);
+                            printMoveList(state.mlist);
                         }
                         break;
                     }
                 }
             }
-            state.dragged_piece.src_sq = -1;
+            state.dragged_piece_src_sq = -1;
         }
     }
 
     printf("gui: Closing window\n");
-    unloadPieceTextures(piece_textures);
+    unloadPieceTextures();
     CloseWindow();
 }
 
@@ -222,7 +220,7 @@ V2 sqDrawPos(int sq)
 Texture2D getPieceTexture(const char *path)
 {
     Image img = LoadImage(path);
-    ImageResize(&img, ICON_SIZE, ICON_SIZE);
+    ImageResize(&img, PIECE_SIZE, PIECE_SIZE);
     Texture2D texture = LoadTextureFromImage(img);
     GenTextureMipmaps(&texture);
     SetTextureFilter(texture, TEXTURE_FILTER_BILINEAR);
@@ -230,59 +228,60 @@ Texture2D getPieceTexture(const char *path)
     return texture;
 }
 
-void loadPieceTextures(Texture2D *arr)
+void loadPieceTextures()
 {
-    arr[WHITE_PIECE | PAWN] = getPieceTexture("./resources/white-pawn.png");
-    arr[WHITE_PIECE | ROOK] = getPieceTexture("./resources/white-rook.png");
-    arr[WHITE_PIECE | KNIGHT] = getPieceTexture("./resources/white-knight.png");
-    arr[WHITE_PIECE | BISHOP] = getPieceTexture("./resources/white-bishop.png");
-    arr[WHITE_PIECE | QUEEN] = getPieceTexture("./resources/white-queen.png");
-    arr[WHITE_PIECE | KING] = getPieceTexture("./resources/white-king.png");
-    arr[BLACK_PIECE | PAWN] = getPieceTexture("./resources/black-pawn.png");
-    arr[BLACK_PIECE | ROOK] = getPieceTexture("./resources/black-rook.png");
-    arr[BLACK_PIECE | KNIGHT] = getPieceTexture("./resources/black-knight.png");
-    arr[BLACK_PIECE | BISHOP] = getPieceTexture("./resources/black-bishop.png");
-    arr[BLACK_PIECE | QUEEN] = getPieceTexture("./resources/black-queen.png");
-    arr[BLACK_PIECE | KING] = getPieceTexture("./resources/black-king.png");
+    textures[WHITE_PIECE | PAWN] = getPieceTexture("./resources/white-pawn.png");
+    textures[WHITE_PIECE | ROOK] = getPieceTexture("./resources/white-rook.png");
+    textures[WHITE_PIECE | KNIGHT] = getPieceTexture("./resources/white-knight.png");
+    textures[WHITE_PIECE | BISHOP] = getPieceTexture("./resources/white-bishop.png");
+    textures[WHITE_PIECE | QUEEN] = getPieceTexture("./resources/white-queen.png");
+    textures[WHITE_PIECE | KING] = getPieceTexture("./resources/white-king.png");
+    textures[BLACK_PIECE | PAWN] = getPieceTexture("./resources/black-pawn.png");
+    textures[BLACK_PIECE | ROOK] = getPieceTexture("./resources/black-rook.png");
+    textures[BLACK_PIECE | KNIGHT] = getPieceTexture("./resources/black-knight.png");
+    textures[BLACK_PIECE | BISHOP] = getPieceTexture("./resources/black-bishop.png");
+    textures[BLACK_PIECE | QUEEN] = getPieceTexture("./resources/black-queen.png");
+    textures[BLACK_PIECE | KING] = getPieceTexture("./resources/black-king.png");
 }
 
-void unloadPieceTextures(Texture2D *arr)
+void unloadPieceTextures()
 {
-    UnloadTexture(arr[WHITE_PIECE | PAWN]);
-    UnloadTexture(arr[WHITE_PIECE | ROOK]);
-    UnloadTexture(arr[WHITE_PIECE | KNIGHT]);
-    UnloadTexture(arr[WHITE_PIECE | BISHOP]);
-    UnloadTexture(arr[WHITE_PIECE | QUEEN]);
-    UnloadTexture(arr[WHITE_PIECE | KING]);
-    UnloadTexture(arr[BLACK_PIECE | PAWN]);
-    UnloadTexture(arr[BLACK_PIECE | ROOK]);
-    UnloadTexture(arr[BLACK_PIECE | KNIGHT]);
-    UnloadTexture(arr[BLACK_PIECE | BISHOP]);
-    UnloadTexture(arr[BLACK_PIECE | QUEEN]);
-    UnloadTexture(arr[BLACK_PIECE | KING]);
+    UnloadTexture(textures[WHITE_PIECE | PAWN]);
+    UnloadTexture(textures[WHITE_PIECE | ROOK]);
+    UnloadTexture(textures[WHITE_PIECE | KNIGHT]);
+    UnloadTexture(textures[WHITE_PIECE | BISHOP]);
+    UnloadTexture(textures[WHITE_PIECE | QUEEN]);
+    UnloadTexture(textures[WHITE_PIECE | KING]);
+    UnloadTexture(textures[BLACK_PIECE | PAWN]);
+    UnloadTexture(textures[BLACK_PIECE | ROOK]);
+    UnloadTexture(textures[BLACK_PIECE | KNIGHT]);
+    UnloadTexture(textures[BLACK_PIECE | BISHOP]);
+    UnloadTexture(textures[BLACK_PIECE | QUEEN]);
+    UnloadTexture(textures[BLACK_PIECE | KING]);
 }
 
-void drawBoard(const Board *b, GuiState state, const Texture2D *textures)
+void drawBoard(const GameState *state)
 {
     if (!IsWindowReady())
         assert(0 && "!IsWindowReady(), Cannot drawBoard()\n");
 
+    Board b = state->board;
+
     int last_move_src_sq = -1, last_move_dst_sq = -1;
-    if (state.last_move != EMPTY_MOVE) {
-        last_move_src_sq = getMoveSrc(state.last_move);
-        last_move_dst_sq = getMoveDst(state.last_move);
+    if (state->last_move != EMPTY_MOVE) {
+        last_move_src_sq = getMoveSrc(state->last_move);
+        last_move_dst_sq = getMoveDst(state->last_move);
     }
 
     int checked_king_sq = -1;
-    if (state.king_checked) {
+    if (state->king_checked) {
         checked_king_sq =
-            b->king_squares[b->color_to_move & WHITE_PIECE ? 0 : 1];
+            b.king_squares[b.color_to_move & WHITE_PIECE ? 0 : 1];
     }
 
-    int drag_src_sq = state.dragged_piece.src_sq;
+    int drag_src_sq = state->dragged_piece_src_sq;
 
     // First draw backgrounds and idle pieces
-    int padding = ICON_DIFF / 2;
     for (int rank = 7; rank >= 0; rank--) {
         for (int file = 0; file < 8; file++) {
             int sq = rank * 8 + file;
@@ -298,16 +297,16 @@ void drawBoard(const Board *b, GuiState state, const Texture2D *textures)
             }
             DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, bg);
 
-            if (sq != drag_src_sq && b->pieces[sq] != EMPTY_PIECE) {
-                DrawTexture(textures[b->pieces[sq]], x + padding, y + padding, WHITE);
+            if (sq != drag_src_sq && b.pieces[sq] != EMPTY_PIECE) {
+                DrawTexture(textures[b.pieces[sq]], x + PIECE_PADDING, y + PIECE_PADDING, WHITE);
             }
         }
     }
 
     // Then draw piece that's being dragged (if any)
     if (drag_src_sq != -1) {
-        V2 pos = state.dragged_piece.draw_pos;
-        DrawTexture(textures[b->pieces[drag_src_sq]], pos.x + padding, pos.y + padding, WHITE);
+        V2 pos = state->dragged_piece_draw_pos;
+        DrawTexture(textures[b.pieces[drag_src_sq]], pos.x + PIECE_PADDING, pos.y + PIECE_PADDING, WHITE);
     }
 }
 
@@ -322,21 +321,29 @@ void drawCheckmate()
              size, RED);
 }
 
-GuiState initGuiState(const Board *b)
+GameState initGameState(Board b)
 {
-    GuiState state = {
-        .king_checked = false,
+    GameState state = {
+        .board = b,
+        .mlist = generateMoves(&b),
         .last_move = EMPTY_MOVE,
+        .king_checked = isKingChecked(&b, b.color_to_move),
         .prom_pending = false,
-        .dragged_piece.src_sq = -1,
+        .computer_thinking = false,
+        .dragged_piece_src_sq = -1,
     };
-
-    if (isKingChecked(b, b->color_to_move))
-        state.king_checked = true;
     return state;
 }
 
-void drawPromotionWindow(Piece promoting_color, Texture2D *textures)
+void updateStateWithMove(GameState *state, Move m)
+{
+    state->board = moveMake(m, state->board);
+    state->last_move = m;
+    state->king_checked = isKingChecked(&state->board, state->board.color_to_move);
+    state->mlist = generateMoves(&state->board);
+}
+
+void drawPromotionWindow(Piece promoting_color)
 {
     int width = CELL_SIZE * 4 + PROM_WIN_PADDING * 2;
     int height = CELL_SIZE + PROM_WIN_PADDING * 2;
@@ -346,7 +353,16 @@ void drawPromotionWindow(Piece promoting_color, Texture2D *textures)
     int pieces_y = PROM_WIN_Y + PROM_WIN_PADDING;
     for (int x = pieces_x_start, i = 0; i < 4; i++, x += CELL_SIZE) {
         DrawRectangle(x, pieces_y, CELL_SIZE, CELL_SIZE, WHITE);
-        DrawTexture(textures[promotables[i] | promoting_color],
-                    x + ICON_DIFF / 2, pieces_y + ICON_DIFF / 2, WHITE);
+        Piece pc = promotables[i] | promoting_color;
+        DrawTexture(textures[pc], x + PIECE_PADDING, pieces_y + PIECE_PADDING, WHITE);
     }
+}
+
+void *playComputerMove(void *st)
+{
+    GameState *state = (GameState *) st;
+    Move m = findBestMove(&state->board);
+    updateStateWithMove(state, m);
+    state->computer_thinking = false;
+    return NULL;
 }

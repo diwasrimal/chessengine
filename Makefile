@@ -8,7 +8,7 @@ RL_LIBS = `pkg-config --libs raylib`
 all: main tests
 
 main: src/main.c $(OBJ)
-	$(CC) $(CFLAGS) $(RL_FLAGS) -o $@ $^ $(RL_LIBS)
+	$(CC) $(CFLAGS) $(RL_FLAGS) -o $@ $^ $(RL_LIBS) -lpthread
 
 tests: src/tests.c $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $^
