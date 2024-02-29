@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "move.h"
 #include "utils.h"
 
 #include <assert.h>
@@ -15,15 +16,11 @@
 #define ICON_DIFF 10
 #define ICON_SIZE (CELL_SIZE - ICON_DIFF)
 
-#define COLOR_CHECK                                                            \
-    (Color) { 0xd7, 0x6c, 0x6c, 0xff }
-#define COLOR_BLACK                                                            \
-    (Color) { 0x4E, 0x53, 0x56, 0xff }
-#define COLOR_MOVE                                                             \
-    (Color) { 0xcb, 0xdd, 0xaf, 0xff }
-#define COLOR_CHECKER_DARK                                                     \
-    (Color) { 0xc7, 0xce, 0xd1, 0xff }
-#define COLOR_CHECKER_LIGHT WHITE
+#define COLOR_CHECK             (Color) { 0xd7, 0x6c, 0x6c, 0xff }
+#define COLOR_BLACK             (Color) { 0x4E, 0x53, 0x56, 0xff }
+#define COLOR_MOVE              (Color) { 0xcb, 0xdd, 0xaf, 0xff }
+#define COLOR_CHECKER_DARK      (Color) { 0xc7, 0xce, 0xd1, 0xff }
+#define COLOR_CHECKER_LIGHT     WHITE
 
 // Piece definitions confilct with colors from raylib
 #define WHITE_PIECE 1 << 6
@@ -31,9 +28,8 @@
 
 // For drawing promotion window
 #define PROM_WIN_PADDING 5
-#define PROM_WIN_X                                                             \
-    (WINDOW_SIZE / 2 - (CELL_SIZE * 4) / 2 - PROM_WIN_PADDING / 2)
-#define PROM_WIN_Y (WINDOW_SIZE / 2 - CELL_SIZE / 2 - PROM_WIN_PADDING / 2)
+#define PROM_WIN_X       (WINDOW_SIZE / 2 - (CELL_SIZE * 4) / 2 - PROM_WIN_PADDING / 2)
+#define PROM_WIN_Y       (WINDOW_SIZE / 2 - CELL_SIZE / 2 - PROM_WIN_PADDING / 2)
 
 typedef struct {
     int x;
@@ -41,14 +37,10 @@ typedef struct {
 } V2;
 
 typedef struct {
-    bool pending;
-    char move_str[10];
-} PromotionState;
-
-typedef struct {
     Move last_move;
     bool king_checked;
-    PromotionState prom_state;
+    bool prom_pending;
+    char prom_move[10];
     struct {
         int src_sq;
         V2 draw_pos;
@@ -72,11 +64,9 @@ void loadPieceTextures(Texture2D *arr);
 void unloadPieceTextures(Texture2D *arr);
 void drawBoard(const Board *b, GuiState state, const Texture2D *textures);
 void drawCheckmate();
-void findTriedMove(char *str, const Board *b, int src_sq, int dst_sq,
-                   PromotionState *prom_state);
-Move getMatchingMove(char *tried, MoveList valids);
 GuiState initGuiState(const Board *b);
 void drawPromotionWindow(Piece promoting_color, Texture2D *textures);
+
 
 int main(int argc, char **argv)
 {
@@ -84,7 +74,7 @@ int main(int argc, char **argv)
     char *fen = (argc >= 2) ? argv[1] : init_fen;
     precomputeValues();
 
-    bool computer_playing = false;
+    bool computer_playing = true;
 
     Board board = initBoardFromFen(fen);
     GuiState state = initGuiState(&board);
@@ -106,31 +96,31 @@ int main(int argc, char **argv)
             continue;
         }
 
-        if (state.prom_state.pending) {
+        if (state.prom_pending) {
             drawPromotionWindow(board.color_to_move, piece_textures);
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                int posx = GetMouseX();
-                int posy = GetMouseY();
+                int x = GetMouseX();
+                int y = GetMouseY();
                 int y_start = PROM_WIN_Y + PROM_WIN_PADDING;
                 int y_end = y_start + CELL_SIZE;
-                int diff = posx - PROM_WIN_X + PROM_WIN_PADDING;
-                if (diff > 0 && y_start <= posy && posy <= y_end) {
+                int diff = x - PROM_WIN_X + PROM_WIN_PADDING;
+                if (diff > 0 && y_start <= y && y <= y_end) {
                     int i = diff / CELL_SIZE;
-                    printf("gui: i is: %d\n", i);
                     if (0 <= i && i <= 3) {
                         char move_str[10];
-                        char prom_notations[4] = {'b', 'r', 'n', 'q'};
-                        sprintf(move_str, "%s%c", state.prom_state.move_str,
-                                prom_notations[i]);
-                        printf("gui: Promotion Move: %s\n", move_str);
-                        Move m = getMatchingMove(move_str, mlist);
-                        if (m != EMPTY_MOVE) {
-                            board = moveMake(m, board);
-                            state.last_move = m;
-                            state.king_checked =
-                                isKingChecked(&board, board.color_to_move);
-                            state.prom_state.pending = false;
-                            mlist = generateMoves(&board);
+                        char prom_notations[4] = {'b', 'r', 'n', 'q'};  // similar to display order
+                        sprintf(move_str, "%s%c", state.prom_move, prom_notations[i]);
+                        for (size_t i = 0; i < mlist.count; i++) {
+                            Move m = mlist.moves[i];
+                            char str[10];
+                            printMoveToString(m, str, false);
+                            if (strcmp(move_str, str) == 0) {
+                                board = moveMake(m, board);
+                                state.last_move = m;
+                                state.king_checked = isKingChecked(&board, board.color_to_move);
+                                mlist = generateMoves(&board);
+                                state.prom_pending = false;
+                            }
                         }
                     }
                 }
@@ -138,8 +128,7 @@ int main(int argc, char **argv)
             EndDrawing();
             continue;
         }
-        EndDrawing();
-
+        
         if (computer_playing) {
             if (board.color_to_move & BLACK_PIECE) {
                 Move m = findBestMove(&board);
@@ -151,6 +140,8 @@ int main(int argc, char **argv)
                 continue;
             }
         }
+
+        EndDrawing();
 
         // Look for dragging events
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
@@ -170,23 +161,33 @@ int main(int argc, char **argv)
             }
         }
 
-        // Trying making move after release
+        // Try making move after release
         if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
             int src_sq = state.dragged_piece.src_sq;
             int dst_sq = rankByPosY(GetMouseY()) * 8 + fileByPosX(GetMouseX());
             if (src_sq != -1 && isValidSquare(dst_sq) && dst_sq != src_sq) {
-                char move_str[10] = {0};
-                findTriedMove(move_str, &board, src_sq, dst_sq, &state.prom_state);
-                if (!state.prom_state.pending) {
-                    printf("gui: Your Move: %s\n", move_str);
-                    Move m = getMatchingMove(move_str, mlist);
-                    if (m != EMPTY_MOVE) {
-                        board = moveMake(m, board);
-                        state.last_move = m;
-                        state.king_checked = isKingChecked(&board, board.color_to_move);
-                        mlist = generateMoves(&board);
-                        printf("\nengine: Possible moves: \n");
-                        printMoveList(mlist);
+
+                char try[10];   // String representation of tried move
+                snprintf(try, sizeof(try), "%s%s", SQNAMES[src_sq], SQNAMES[dst_sq]);
+                printf("gui: tried move: %s\n", try);
+
+                for (size_t i = 0; i < mlist.count; i++) {
+                    Move m = mlist.moves[i];
+                    char str[10];
+                    printMoveToString(m, str, false);
+                    if (strncmp(str, try, 4) == 0) {
+                        MoveFlag flag = getMoveFlag(m);
+                        if (flag & PROMOTION) {
+                            state.prom_pending = true;
+                            strcpy(state.prom_move, try);
+                        } else {
+                            board = moveMake(m, board);
+                            state.last_move = m;
+                            state.king_checked = isKingChecked(&board, board.color_to_move);
+                            mlist = generateMoves(&board);
+                            printMoveList(mlist);
+                        }
+                        break;
                     }
                 }
             }
@@ -321,44 +322,12 @@ void drawCheckmate()
              size, RED);
 }
 
-void findTriedMove(char *str, const Board *b, int src_sq, int dst_sq,
-                   PromotionState *prom_state)
-{
-    if (src_sq == dst_sq || !isValidSquare(src_sq) || !isValidSquare(dst_sq))
-        return;
-
-    // Get type of piece if promotion happening
-    // TODO: use a graphical interface
-    int drank = dst_sq / 8;
-    char promoted = '\0';
-
-    if ((b->pieces[src_sq] & (PAWN | WHITE_PIECE) && drank == 7) ||
-        (b->pieces[src_sq] & (PAWN | BLACK_PIECE) && drank == 0)) {
-        prom_state->pending = true;
-        sprintf(prom_state->move_str, "%s%s", SQNAMES[src_sq], SQNAMES[dst_sq]);
-    }
-
-    sprintf(str, "%s%s%c", SQNAMES[src_sq], SQNAMES[dst_sq], promoted);
-}
-
-Move getMatchingMove(char *tried, MoveList valids)
-{
-    char valid_str[10];
-    for (size_t i = 0; i < valids.count; i++) {
-        printMoveToString(valids.moves[i], valid_str, false);
-        if (strcmp(tried, valid_str) == 0) {
-            return valids.moves[i];
-        }
-    }
-    return EMPTY_MOVE;
-}
-
 GuiState initGuiState(const Board *b)
 {
     GuiState state = {
         .king_checked = false,
         .last_move = EMPTY_MOVE,
-        .prom_state.pending = false,
+        .prom_pending = false,
         .dragged_piece.src_sq = -1,
     };
 
