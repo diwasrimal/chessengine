@@ -218,7 +218,7 @@ uint64_t generateTillDepth(Board b, int depth, bool show_move)
 
     int total = 0;
     char move_str[20];
-    MoveList list = generatePseudoLegalMoves(&b);
+    MoveList list = generateMoves(&b);
 
     for (size_t i = 0; i < list.count; i++) {
         Board new = moveMake(list.moves[i], b);
@@ -282,7 +282,7 @@ Move findBestMove(const Board *b)
     int alpha = INT_MIN;
     int beta = INT_MAX;
 
-    MoveList mlist = generatePseudoLegalMoves(b);
+    MoveList mlist = generateMoves(b);
     clock_t start = clock();
     char move_str[20];
 
@@ -324,7 +324,7 @@ int bestEvaluation(const Board *b, int depth, bool is_maximizing, int alpha, int
         return evaluateBoard(b);
 
     int best_score = is_maximizing ? INT_MIN : INT_MAX;
-    MoveList mlist = generatePseudoLegalMoves(b);
+    MoveList mlist = generateMoves(b);
     char move_str[20];
 
     for (size_t i = 0; i < mlist.count; i++) {

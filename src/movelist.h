@@ -10,7 +10,6 @@ typedef struct {
     size_t count;
 } MoveList;
 
-void orderMoves(MoveList *mlist);
 void printMoveList(const MoveList move_list);
 
 
