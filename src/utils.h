@@ -14,5 +14,6 @@ bool isValidSquare(int sq);
 bool isValidRankAndFile(int rank, int file);
 int squareNameToIdx(char *name);
 uint64_t decToBin(int n);
+uint64_t rand64(void);
 
 #endif // UTILS_H

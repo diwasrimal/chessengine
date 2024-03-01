@@ -1,4 +1,5 @@
 #include "utils.h"
+#include <stdlib.h>
 
 const char *SQNAMES[64] = {
     "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1",
@@ -45,3 +46,10 @@ uint64_t decToBin(int n)
     return result;
 }
 
+// Generates random 64 bit integer (assuming srand() is called)
+uint64_t rand64(void)
+{
+    uint64_t r1 = rand(); // assuming RAND_MAX == 2^32-1
+    uint64_t r2 = rand();
+    return (r1 << 32) | (r2);
+}

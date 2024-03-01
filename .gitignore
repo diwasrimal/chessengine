@@ -1,10 +1,7 @@
 tmp*
-*.o
 *.dSYM
 todo.txt
 compile_flags.txt
 /data.txt
 /engine-interface.txt
-/tests
-/cli
-/gui
+/build

@@ -8,4 +8,5 @@ Yet to complete...
 git clone https://github.com/diwasrimal/chessengine.git
 cd chessengine
 make
+./build/main
 ```

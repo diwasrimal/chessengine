@@ -1,20 +1,24 @@
 CC = clang
 CFLAGS = -Wall -Wextra -O3
-HEADERS = src/engine.h src/move.h src/piece.h src/utils.h
-OBJ = engine.o move.o piece.o utils.o
-RL_FLAGS = `pkg-config --cflags raylib`
+HEADERS = $(wildcard src/*.h)
+SRC = $(wildcard src/*c)
+OBJ = $(filter-out build/main.o build/tests.o, $(patsubst src/%.c, build/%.o, $(SRC)))
+
+# Raylib specific
+RL_CFLAGS = `pkg-config --cflags raylib`
 RL_LIBS = `pkg-config --libs raylib`
 
-all: main tests
+all: build/main build/tests
 
-main: src/main.c $(OBJ)
-	$(CC) $(CFLAGS) $(RL_FLAGS) -o $@ $^ $(RL_LIBS) -lpthread
+build/main: src/main.c $(OBJ)
+	$(CC) $(CFLAGS) $(RL_CFLAGS) -o $@ $^ $(RL_LIBS) -lpthread
 
-tests: src/tests.c $(OBJ)
+build/tests: src/tests.c $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $^
 
-%.o: src/%.c $(HEADERS)
+build/%.o: src/%.c $(HEADERS)
+	@mkdir -p build
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f *.o main tests
+	rm -rf build
