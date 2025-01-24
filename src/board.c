@@ -35,7 +35,7 @@ Board initBoardFromFen(char *starting_fen)
     types['p'] = BLACK | PAWN;
 
     char fen[100];
-    strcpy(fen, starting_fen);
+    strncpy(fen, starting_fen, sizeof(fen));
 
     // Piece arrangement
     char *arrangement = strtok(fen, " ");
