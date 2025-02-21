@@ -1,5 +1,6 @@
 #include "engine.h"
 #include "move.h"
+#include "piece.h"
 #include "utils.h"
 
 #include <assert.h>
@@ -14,7 +15,7 @@
 #define BOARD_SIZE (CELL_SIZE * 8)
 #define WINDOW_SIZE (BOARD_SIZE + BOARD_PADDING * 2)
 
-#define PIECE_PADDING 5
+#define PIECE_PADDING 4
 #define PIECE_SIZE (CELL_SIZE - PIECE_PADDING*2)
 
 #define COLOR_CHECK             (Color) { 0xd7, 0x6c, 0x6c, 0xff }
@@ -57,9 +58,11 @@ int drawYByRank(int rank);
 int fileByPosX(int posx);
 int rankByPosY(int posy);
 void drawBoard(const GameState *state);
+void drawPiece(Piece piece, int square_x, int square_y);
 void drawCheckmate();
 void drawPromotionWindow(Piece promoting_color);
 void loadPieceTextures();
+void loadTextureMapAndPieceRects();
 void unloadPieceTextures();
 void updateStateWithMove(GameState *state, Move m);
 void *playComputerMove(void *st);
@@ -71,8 +74,12 @@ Piece promotables[4] = {
     QUEEN,
 };
 
-// Textures for pieces, indexed by Piece itself
-Texture2D textures[256];
+// Single texture that holds all pieces,
+Texture piece_texture_map;
+
+// Stores individual piece's position in the texture map
+Rectangle piece_texture_rect[256];
+
 
 int main(int argc, char **argv)
 {
@@ -81,7 +88,7 @@ int main(int argc, char **argv)
     precomputeValues();
 
     GameState state = initGameState(initBoardFromFen(fen));
-    bool computer_playing = true;
+    bool computer_playing = false;
 
     // Board board = initBoardFromFen(fen);
     // GuiState state = initGuiState(&board);
@@ -89,7 +96,7 @@ int main(int argc, char **argv)
 
     InitWindow(WINDOW_SIZE, WINDOW_SIZE, "Chess");
     SetTargetFPS(60);
-    loadPieceTextures();
+    loadTextureMapAndPieceRects();
 
     while (!WindowShouldClose()) {
         BeginDrawing();
@@ -193,7 +200,7 @@ int main(int argc, char **argv)
     }
 
     printf("gui: Closing window\n");
-    unloadPieceTextures();
+    UnloadTexture(piece_texture_map);
     CloseWindow();
 }
 
@@ -216,47 +223,41 @@ V2 sqDrawPos(int sq)
     return pos;
 }
 
+void loadTextureMapAndPieceRects()
+{
+    piece_texture_map = LoadTexture("./resources/chess-pieces.png");
+    GenTextureMipmaps(&piece_texture_map);
+    SetTextureFilter(piece_texture_map, TEXTURE_FILTER_TRILINEAR);
+
+    const int crop_size = 468;
+    const Piece texture_map_pieces_in_order[6] = {KING, QUEEN, BISHOP, KNIGHT, ROOK, PAWN};
+
+    for (int i = 0; i < 6; i++) {
+        Piece p = texture_map_pieces_in_order[i];
+        piece_texture_rect[p | WHITE_PIECE] = (Rectangle){
+            .x = i * crop_size,
+            .y = 0 * crop_size,
+            .height = crop_size,
+            .width = crop_size,
+        };
+        piece_texture_rect[p | BLACK_PIECE] = (Rectangle){
+            .x = i * crop_size,
+            .y = 1 * crop_size,
+            .height = crop_size,
+            .width = crop_size,
+        };
+    }
+}
+
 Texture2D getPieceTexture(const char *path)
 {
     Image img = LoadImage(path);
     ImageResize(&img, PIECE_SIZE, PIECE_SIZE);
     Texture2D texture = LoadTextureFromImage(img);
     GenTextureMipmaps(&texture);
-    SetTextureFilter(texture, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(texture, TEXTURE_FILTER_TRILINEAR);
     UnloadImage(img);
     return texture;
-}
-
-void loadPieceTextures()
-{
-    textures[WHITE_PIECE | PAWN] = getPieceTexture("./resources/white-pawn.png");
-    textures[WHITE_PIECE | ROOK] = getPieceTexture("./resources/white-rook.png");
-    textures[WHITE_PIECE | KNIGHT] = getPieceTexture("./resources/white-knight.png");
-    textures[WHITE_PIECE | BISHOP] = getPieceTexture("./resources/white-bishop.png");
-    textures[WHITE_PIECE | QUEEN] = getPieceTexture("./resources/white-queen.png");
-    textures[WHITE_PIECE | KING] = getPieceTexture("./resources/white-king.png");
-    textures[BLACK_PIECE | PAWN] = getPieceTexture("./resources/black-pawn.png");
-    textures[BLACK_PIECE | ROOK] = getPieceTexture("./resources/black-rook.png");
-    textures[BLACK_PIECE | KNIGHT] = getPieceTexture("./resources/black-knight.png");
-    textures[BLACK_PIECE | BISHOP] = getPieceTexture("./resources/black-bishop.png");
-    textures[BLACK_PIECE | QUEEN] = getPieceTexture("./resources/black-queen.png");
-    textures[BLACK_PIECE | KING] = getPieceTexture("./resources/black-king.png");
-}
-
-void unloadPieceTextures()
-{
-    UnloadTexture(textures[WHITE_PIECE | PAWN]);
-    UnloadTexture(textures[WHITE_PIECE | ROOK]);
-    UnloadTexture(textures[WHITE_PIECE | KNIGHT]);
-    UnloadTexture(textures[WHITE_PIECE | BISHOP]);
-    UnloadTexture(textures[WHITE_PIECE | QUEEN]);
-    UnloadTexture(textures[WHITE_PIECE | KING]);
-    UnloadTexture(textures[BLACK_PIECE | PAWN]);
-    UnloadTexture(textures[BLACK_PIECE | ROOK]);
-    UnloadTexture(textures[BLACK_PIECE | KNIGHT]);
-    UnloadTexture(textures[BLACK_PIECE | BISHOP]);
-    UnloadTexture(textures[BLACK_PIECE | QUEEN]);
-    UnloadTexture(textures[BLACK_PIECE | KING]);
 }
 
 void drawBoard(const GameState *state)
@@ -297,7 +298,7 @@ void drawBoard(const GameState *state)
             DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, bg);
 
             if (sq != drag_src_sq && b.pieces[sq] != EMPTY_PIECE) {
-                DrawTexture(textures[b.pieces[sq]], x + PIECE_PADDING, y + PIECE_PADDING, WHITE);
+                drawPiece(b.pieces[sq], x, y);
             }
         }
     }
@@ -305,8 +306,20 @@ void drawBoard(const GameState *state)
     // Then draw piece that's being dragged (if any)
     if (drag_src_sq != -1) {
         V2 pos = state->dragged_piece_draw_pos;
-        DrawTexture(textures[b.pieces[drag_src_sq]], pos.x + PIECE_PADDING, pos.y + PIECE_PADDING, WHITE);
+        drawPiece(b.pieces[drag_src_sq], pos.x, pos.y);
     }
+}
+
+void drawPiece(Piece piece, int square_x, int square_y)
+{
+    Rectangle src = piece_texture_rect[piece];
+    Rectangle dst = {
+        .x = square_x + PIECE_PADDING,
+        .y = square_y + PIECE_PADDING,
+        .height = PIECE_SIZE,
+        .width = PIECE_SIZE
+    };
+    DrawTexturePro(piece_texture_map, src, dst, (Vector2){0, 0}, 0, WHITE);
 }
 
 void drawCheckmate()
@@ -358,8 +371,7 @@ void drawPromotionWindow(Piece promoting_color)
     int pieces_y = PROM_WIN_Y + PROM_WIN_PADDING;
     for (int x = pieces_x_start, i = 0; i < 4; i++, x += CELL_SIZE) {
         DrawRectangle(x, pieces_y, CELL_SIZE, CELL_SIZE, WHITE);
-        Piece pc = promotables[i] | promoting_color;
-        DrawTexture(textures[pc], x + PIECE_PADDING, pieces_y + PIECE_PADDING, WHITE);
+        drawPiece(promotables[i] | promoting_color, x, pieces_y);
     }
 }
 
