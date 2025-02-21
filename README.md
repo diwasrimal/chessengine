@@ -1,7 +1,5 @@
 # Chessengine
 
-Yet to complete...
-
 ## Build
 
 ```
@@ -10,3 +8,9 @@ cd chessengine
 make
 ./build/main
 ```
+
+## Goals
+- [x] Minimax + Alpha-Beta pruning
+- [x] Zobrist Hashes
+- [ ] Transposition Table
+- [ ] Iterative Deepening
