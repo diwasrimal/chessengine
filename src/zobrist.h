@@ -2,6 +2,7 @@
 #define ZOBRIST_H
 
 #include <stdint.h>
+
 // This struct of pseudorandom numbers is used to hash a chess position
 // hashing a position allows caching the search results in a transposition table
 // pieces[2][6][64]: 2 colors, 6 piece types, for each of 64 squares
@@ -12,7 +13,9 @@ struct ZobristValues {
     uint64_t castles[16];
     uint64_t ep_square[64];
     uint64_t black;
-} ZOBRIST;
+};
+
+extern struct ZobristValues ZOBRIST;
 
 void populateZobristValues(void);
 

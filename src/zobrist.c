@@ -2,6 +2,8 @@
 #include "utils.h"
 #include <stdlib.h>
 
+struct ZobristValues ZOBRIST;
+
 // Populates the ZOBRIST struct with random values
 // Called by engine during start, via precomputeValues()
 void populateZobristValues(void)
