@@ -4,7 +4,6 @@
 #include "utils.h"
 
 #include <assert.h>
-#include <ctype.h>
 #include <raylib.h>
 #include <stdio.h>
 #include <string.h>
@@ -50,6 +49,13 @@ typedef struct {
     V2 dragged_piece_draw_pos;
 } GameState;
 
+
+enum {
+    SOUND_CAPTURE,
+    SOUND_MOVE,
+    NUM_SOUNDS,
+};
+
 GameState initGameState(Board b);
 Texture2D getPieceTexture(const char *path);
 V2 sqDrawPos(int sq);
@@ -61,9 +67,11 @@ void drawBoard(const GameState *state);
 void drawPiece(Piece piece, int square_x, int square_y);
 void drawCheckmate();
 void drawPromotionWindow(Piece promoting_color);
-void loadPieceTextures();
 void loadTextureMapAndPieceRects();
-void unloadPieceTextures();
+void unloadTextureMap();
+void loadSounds();
+void unloadSounds();
+void playMoveSound(Move m);
 void updateStateWithMove(GameState *state, Move m);
 void *playComputerMove(void *st);
 
@@ -80,6 +88,7 @@ Texture piece_texture_map;
 // Stores individual piece's position in the texture map
 Rectangle piece_texture_rect[256];
 
+Sound sounds[NUM_SOUNDS];
 
 int main(int argc, char **argv)
 {
@@ -90,13 +99,11 @@ int main(int argc, char **argv)
     GameState state = initGameState(initBoardFromFen(fen));
     bool computer_playing = true;
 
-    // Board board = initBoardFromFen(fen);
-    // GuiState state = initGuiState(&board);
-    // MoveList mlist = generateMoves(&board);
-
     InitWindow(WINDOW_SIZE, WINDOW_SIZE, "Chess");
+    InitAudioDevice();
     SetTargetFPS(60);
     loadTextureMapAndPieceRects();
+    loadSounds();
 
     while (!WindowShouldClose()) {
         BeginDrawing();
@@ -129,6 +136,7 @@ int main(int argc, char **argv)
                             printMoveToString(m, str, false);
                             if (strcmp(move_str, str) == 0) {
                                 updateStateWithMove(&state, m);
+                                playMoveSound(m);
                                 state.prom_pending = false;
                             }
                         }
@@ -190,6 +198,7 @@ int main(int argc, char **argv)
                             strcpy(state.prom_move, try);
                         } else {
                             updateStateWithMove(&state, m);
+                            playMoveSound(m);
                         }
                         break;
                     }
@@ -199,8 +208,9 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("gui: Closing window\n");
-    UnloadTexture(piece_texture_map);
+    unloadTextureMap();
+    unloadSounds();
+    CloseAudioDevice();
     CloseWindow();
 }
 
@@ -249,6 +259,26 @@ void loadTextureMapAndPieceRects()
     }
 }
 
+
+void loadSounds()
+{
+    sounds[SOUND_MOVE] = LoadSound("./resources/move-self.mp3");
+    sounds[SOUND_CAPTURE] = LoadSound("./resources/capture.mp3");
+}
+
+
+void unloadTextureMap()
+{
+    UnloadTexture(piece_texture_map);
+}
+
+void unloadSounds()
+{
+    for (int i = 0; i < NUM_SOUNDS; i++)
+        UnloadSound(sounds[i]);
+}
+
+
 Texture2D getPieceTexture(const char *path)
 {
     Image img = LoadImage(path);
@@ -258,6 +288,16 @@ Texture2D getPieceTexture(const char *path)
     SetTextureFilter(texture, TEXTURE_FILTER_TRILINEAR);
     UnloadImage(img);
     return texture;
+}
+
+void playMoveSound(Move m)
+{
+    MoveFlag flag = getMoveFlag(m);
+    if (flag & CAPTURE) {
+        PlaySound(sounds[SOUND_CAPTURE]);
+    } else {
+        PlaySound(sounds[SOUND_MOVE]);
+    }
 }
 
 void drawBoard(const GameState *state)
@@ -380,6 +420,7 @@ void *playComputerMove(void *st)
     GameState *state = (GameState *) st;
     Move m = findBestMove(&state->board);
     updateStateWithMove(state, m);
+    playMoveSound(m);
     state->computer_thinking = false;
     return NULL;
 }

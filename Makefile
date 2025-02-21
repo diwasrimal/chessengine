@@ -1,3 +1,5 @@
+.PHONY: clean all
+
 CC = clang
 CFLAGS = -Wall -Wextra -O3
 HEADERS = $(wildcard src/*.h)
