@@ -5,3 +5,7 @@ compile_flags.txt
 /data.txt
 /engine-interface.txt
 /build
+
+lib/
+release.sh
+releases/
