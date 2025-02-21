@@ -88,7 +88,7 @@ int main(int argc, char **argv)
     precomputeValues();
 
     GameState state = initGameState(initBoardFromFen(fen));
-    bool computer_playing = false;
+    bool computer_playing = true;
 
     // Board board = initBoardFromFen(fen);
     // GuiState state = initGuiState(&board);
