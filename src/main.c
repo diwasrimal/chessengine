@@ -53,6 +53,8 @@ typedef struct {
 enum {
     SOUND_CAPTURE,
     SOUND_MOVE,
+	SOUND_CHECK,
+	SOUND_PROMOTION,
     NUM_SOUNDS,
 };
 
@@ -71,7 +73,7 @@ void loadTextureMapAndPieceRects();
 void unloadTextureMap();
 void loadSounds();
 void unloadSounds();
-void playMoveSound(Move m);
+void playMoveSound(const Board *b, Move m);
 void updateStateWithMove(GameState *state, Move m);
 void *playComputerMove(void *st);
 
@@ -136,7 +138,7 @@ int main(int argc, char **argv)
                             printMoveToString(m, str, false);
                             if (strcmp(move_str, str) == 0) {
                                 updateStateWithMove(&state, m);
-                                playMoveSound(m);
+                                playMoveSound(&state.board, m);
                                 state.prom_pending = false;
                             }
                         }
@@ -198,7 +200,7 @@ int main(int argc, char **argv)
                             strcpy(state.prom_move, try);
                         } else {
                             updateStateWithMove(&state, m);
-                            playMoveSound(m);
+                            playMoveSound(&state.board, m);
                         }
                         break;
                     }
@@ -264,6 +266,8 @@ void loadSounds()
 {
     sounds[SOUND_MOVE] = LoadSound("./resources/move-self.mp3");
     sounds[SOUND_CAPTURE] = LoadSound("./resources/capture.mp3");
+    sounds[SOUND_CHECK] = LoadSound("./resources/move-check.mp3");
+    sounds[SOUND_PROMOTION] = LoadSound("./resources/promote.mp3");
 }
 
 
@@ -290,11 +294,18 @@ Texture2D getPieceTexture(const char *path)
     return texture;
 }
 
-void playMoveSound(Move m)
+// Should be called after move is made on board
+void playMoveSound(const Board *b, Move m)
 {
+    if (isKingChecked(b, WHITE_PIECE) || isKingChecked(b, BLACK_PIECE)) { // @todo: is this slow?
+        PlaySound(sounds[SOUND_CHECK]);
+        return;
+    }
     MoveFlag flag = getMoveFlag(m);
     if (flag & CAPTURE) {
         PlaySound(sounds[SOUND_CAPTURE]);
+    } else if (flag & PROMOTION){
+        PlaySound(sounds[SOUND_PROMOTION]);
     } else {
         PlaySound(sounds[SOUND_MOVE]);
     }
@@ -420,7 +431,7 @@ void *playComputerMove(void *st)
     GameState *state = (GameState *) st;
     Move m = findBestMove(&state->board);
     updateStateWithMove(state, m);
-    playMoveSound(m);
+    playMoveSound(&state->board, m);
     state->computer_thinking = false;
     return NULL;
 }
