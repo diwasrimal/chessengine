@@ -1,3 +1,4 @@
+#include "board.h"
 #include "engine.h"
 #include "move.h"
 #include "piece.h"
@@ -109,7 +110,14 @@ int main(int argc, char **argv)
 
     while (!WindowShouldClose()) {
         BeginDrawing();
-        ClearBackground(COLOR_BLACK);
+		ClearBackground(COLOR_BLACK);
+
+		if (IsKeyPressed(KEY_F)) {
+			char fen[100];
+			printBoardFenToString(fen, sizeof(fen), &state.board);
+			printf("Fen: %s\n", fen);
+		}
+
 
         drawBoard(&state);
         if (state.mlist.count == 0) {

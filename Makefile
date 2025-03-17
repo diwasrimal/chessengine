@@ -1,5 +1,3 @@
-.PHONY: clean all
-
 CC = clang
 CFLAGS = -Wall -Wextra -O3
 HEADERS = $(wildcard src/*.h)
@@ -10,6 +8,7 @@ OBJ = $(filter-out build/main.o build/tests.o, $(patsubst src/%.c, build/%.o, $(
 RL_CFLAGS = `pkg-config --cflags raylib`
 RL_LIBS = `pkg-config --libs raylib`
 
+.PHONY: all 
 all: build/main build/tests
 
 build/main: src/main.c $(OBJ)
@@ -22,5 +21,6 @@ build/%.o: src/%.c $(HEADERS)
 	@mkdir -p build
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+.PHONY: clean
 clean:
 	rm -rf build

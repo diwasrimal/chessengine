@@ -1,6 +1,8 @@
+#include "board.h"
 #include "engine.h"
 
 #include <stdbool.h>
+#include <string.h>
 #include <time.h>
 #include <stdio.h>
 
@@ -8,15 +10,17 @@ void testIsKingChecked();
 void testPerformance();
 void testMoveGeneration();
 void testZobristHashes();
+void testFenGeneration();
 
 int main(void)
 {
     precomputeValues();
 
     testIsKingChecked();
-    testPerformance();
-    testMoveGeneration();
+	testFenGeneration();
     testZobristHashes();
+    testMoveGeneration();
+    testPerformance();
 }
 
 void testMoveGeneration(void)
@@ -244,4 +248,34 @@ void testZobristHashes(void)
         }
         printf("[%s]: depth: %d, fen: %s\n", passed ? "pass" : "FAIL", depth, fens[i]);
     }
+}
+
+
+void testFenGeneration(void) 
+{
+	printf("\ntestFenGeneration()\n");
+
+    char *fens[] = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "5r2/2p1p1N1/4P3/2R1R3/NK3pp1/5Pk1/2P1pp2/8 w - - 0 1",
+        "6R1/5P2/3p4/2Qr4/1p1pp2p/p4P1R/KP1P4/4k3 w - - 0 1",
+        "4kbnr/1pp2ppp/r2qb3/p2Pn3/2BP1B2/2N2N2/PPP1QPPP/R3R1K1 w k - 0 1",
+        "8/4pP2/1k1N2qP/1n1P4/PpK2b1P/8/1rP4R/8 w - - 0 1",
+        "r1bqkbnr/ppp2ppp/8/3Pn3/2B5/5N2/PPPPQPPP/RNB2RK1 b kq - 0 1",
+		"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+		"rnbqkb1r/ppNpp1pp/5n2/5p2/8/8/PPPPPPPP/R1BQKBNR b KQkq - 0 1",
+		"rnb1kb1r/ppppqppp/8/8/8/5n2/PPPP1PPP/RNBQKBNR w KQkq - 0 1",
+		"rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+		"1n2k1nr/1ppp1ppp/5N2/4p3/1b1P2Pq/N5b1/1PPQPP1P/r1B1KB1R b Kk - 0 1",
+		"1n2k1nr/1ppp1ppp/8/3Np2B/1b1P2Pq/N5b1/1PPQPP1P/r1B1K2R b Kk - 0 1",
+
+    };
+    const int n = sizeof(fens) / sizeof(fens[0]);
+	for (int i = 0; i < n; i++) {
+		char generated[100];
+		const Board b = initBoardFromFen(fens[i]);
+		printBoardFenToString(generated, sizeof(generated), &b);
+		bool passed = strcmp(fens[i], generated) == 0;
+		printf("[%s]: actual_fen: \"%s\", generated_fen: \"%s\"\n", passed ? "pass" : "FAIL", fens[i], generated);
+	}
 }

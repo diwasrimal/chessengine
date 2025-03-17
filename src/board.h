@@ -18,5 +18,6 @@ typedef struct {
 Board initBoardFromFen(char *starting_fen);
 uint64_t getZobristHash(const Board *b);
 void printBoard(const Board b);
+void printBoardFenToString(char *str, int max_str_size, const Board *b);
 
 #endif // !BOARD_H

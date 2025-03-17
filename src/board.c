@@ -1,4 +1,5 @@
 #include "board.h"
+#include "piece.h"
 #include "utils.h"
 #include "zobrist.h"
 
@@ -182,3 +183,60 @@ void printBoard(const Board b)
         b.zobrist_hash
     );
 }
+
+void printBoardFenToString(char *str, int max_str_size, const Board *b)
+{
+    // Ex: starting postion fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    char arrangement[100];
+    int i = -1;
+
+    for (int rank = 7; rank >= 0; rank--) {
+        int empty = 0;
+        for (int file = 0; file < 8; file++) {
+            int sq = rank * 8 + file;
+            Piece p = b->pieces[sq];
+            if (p == EMPTY_PIECE) {
+                empty++;
+            } else {
+                if (empty > 0) {
+                    arrangement[++i] = empty + '0';
+                    empty = 0;
+                }
+                arrangement[++i] = pieceToNotation(p);
+            }
+        }
+        if (empty > 0)
+            arrangement[++i] = empty + '0';
+        arrangement[++i] = '/';
+    }
+    arrangement[i] = '\0'; // remove last '/' and terminate the string
+
+    char turn = (b->color_to_move & WHITE ? 'w' : 'b');
+
+    char castles[5];
+    i = -1;
+	if (b->castle_rights == NO_CASTLE) {
+		castles[++i] = '-';
+	} else {
+		if (b->castle_rights & WKSC) castles[++i] = 'K';
+		if (b->castle_rights & WQSC) castles[++i] = 'Q';
+		if (b->castle_rights & BKSC) castles[++i] = 'k';
+		if (b->castle_rights & BQSC) castles[++i] = 'q';
+	}
+    castles[++i] = '\0';
+
+
+    char ep_square[3];
+    i = -1;
+    if (b->ep_square == -1) {
+        ep_square[++i] = '-';
+    } else {
+        ep_square[++i] = b->ep_square / 10 + '0';
+        ep_square[++i] = b->ep_square % 10 + '0';
+    }
+    ep_square[++i] = '\0';
+
+    // "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    snprintf(str, max_str_size,  "%s %c %s %s %d %d", arrangement, turn, castles, ep_square, b->halfmove_clock, b->fullmoves);
+}
+
