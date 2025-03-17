@@ -23,7 +23,7 @@ int getMoveDst(Move m)
     return m & DST_SQ_MASK;
 }
 
-void printMoveToString(Move m, char *str, bool print_flag)
+void printMoveToString(char *str, int max_str_size, Move m, bool print_flag)
 {
     MoveFlag flag = getMoveFlag(m);
     int src_sq = getMoveSrc(m);
@@ -42,7 +42,7 @@ void printMoveToString(Move m, char *str, bool print_flag)
         promo_type = "r";
 
     if (print_flag)
-        sprintf(str, "%s%s%s[%04llu]", src_sqname, dst_sqname, promo_type, decToBin(flag));
+        snprintf(str, max_str_size, "%s%s%s[%04llu]", src_sqname, dst_sqname, promo_type, decToBin(flag));
     else
-        sprintf(str, "%s%s%s", src_sqname, dst_sqname, promo_type);
+        snprintf(str, max_str_size, "%s%s%s", src_sqname, dst_sqname, promo_type);
 }

@@ -43,6 +43,6 @@ Move moveEncode(MoveFlag flag, int src_sq, int dst_sq);
 MoveFlag getMoveFlag(Move m);
 int getMoveSrc(Move m);
 int getMoveDst(Move m);
-void printMoveToString(Move m, char *str, bool print_flag);
+void printMoveToString(char *str, int max_str_size, Move m, bool print_flag);
 
 #endif // MOVE_H

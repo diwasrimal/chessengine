@@ -204,7 +204,7 @@ bool checkZobristTillDepth(const Board *b, int depth)
         bool result = checkZobristTillDepth(&updated, depth - 1);
         if (!result) {
             char move_str[15];
-            printMoveToString(mlist.moves[i], move_str, true);
+            printMoveToString(move_str, sizeof(move_str), mlist.moves[i], true);
             printf("On move: %s, depth: %d\n", move_str, depth);
             return false;
         }
@@ -235,7 +235,7 @@ void testZobristHashes(void)
             passed = checkZobristTillDepth(&updated, depth - 1);
             if (!passed) {
                 char move_str[15];
-                printMoveToString(mlist.moves[i], move_str, true);
+                printMoveToString(move_str, sizeof(move_str), mlist.moves[i], true);
                 printf("On move: %s, depth: %d\n", move_str, depth);
                 printf("On board..\n");
                 printBoard(b);

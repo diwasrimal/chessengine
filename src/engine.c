@@ -224,7 +224,7 @@ uint64_t generateTillDepth(Board b, int depth, bool show_move)
         Board new = moveMake(list.moves[i], b);
         int n_moves = generateTillDepth(new, depth - 1, false);
         if (show_move) {
-            printMoveToString(list.moves[i], move_str, true);
+            printMoveToString(move_str, sizeof(move_str), list.moves[i], true);
             printf("%s: %d\n", move_str, n_moves);
         }
         total += n_moves;
@@ -291,7 +291,7 @@ Move findBestMove(const Board *b)
         return mlist.moves[0];
 
     for (size_t i = 0; i < mlist.count; i++) {
-        // printMoveToString(mlist.moves[i], move_str, true);
+        // printMoveToString(move_str, sizeof(move_str), mlist.moves[i], true);
         Board updated = moveMake(mlist.moves[i], *b);
         if (is_maximizing) {
             int score = bestEvaluation(&updated, minimax_depth - 1, false, alpha, beta);
@@ -328,7 +328,7 @@ int bestEvaluation(const Board *b, int depth, bool is_maximizing, int alpha, int
     char move_str[20];
 
     for (size_t i = 0; i < mlist.count; i++) {
-        // printMoveToString(mlist.moves[i], move_str, true);
+        // printMoveToString(move_str, sizeof(move_str), mlist.moves[i], true);
         Board updated = moveMake(mlist.moves[i], *b);
         if (is_maximizing) {
             int score = bestEvaluation(&updated, depth - 1, false, alpha, beta);

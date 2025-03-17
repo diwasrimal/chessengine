@@ -131,11 +131,11 @@ int main(int argc, char **argv)
                     if (0 <= i && i <= 3) {
                         char move_str[10];
                         char prom_notations[4] = {'b', 'r', 'n', 'q'};  // similar to display order
-                        sprintf(move_str, "%s%c", state.prom_move, prom_notations[i]);
+                        snprintf(move_str, sizeof(move_str), "%s%c", state.prom_move, prom_notations[i]);
                         for (size_t i = 0; i < state.mlist.count; i++) {
                             Move m = state.mlist.moves[i];
                             char str[10];
-                            printMoveToString(m, str, false);
+                            printMoveToString(str, sizeof(str), m, false);
                             if (strcmp(move_str, str) == 0) {
                                 updateStateWithMove(&state, m);
                                 playMoveSound(&state.board, m);
@@ -192,7 +192,7 @@ int main(int argc, char **argv)
                 for (size_t i = 0; i < state.mlist.count; i++) {
                     Move m = state.mlist.moves[i];
                     char str[10];
-                    printMoveToString(m, str, false);
+                    printMoveToString(str, sizeof(str), m, false);
                     if (strncmp(str, try, 4) == 0) {
                         MoveFlag flag = getMoveFlag(m);
                         if (flag & PROMOTION) {
