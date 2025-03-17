@@ -231,8 +231,8 @@ void printBoardFenToString(char *str, int max_str_size, const Board *b)
     if (b->ep_square == -1) {
         ep_square[++i] = '-';
     } else {
-        ep_square[++i] = b->ep_square / 10 + '0';
-        ep_square[++i] = b->ep_square % 10 + '0';
+		ep_square[++i] = b->ep_square % 8 + 'a'; // file
+		ep_square[++i] = b->ep_square / 8 + '1'; // rank
     }
     ep_square[++i] = '\0';
 
